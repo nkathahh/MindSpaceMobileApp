@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    tools:context=".ui.mood.MoodFragment">
+
+    <!-- Title -->
+    <TextView
+        android:id="@+id/moodTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="How are you feeling today?"
+        android:textAppearance="?android:attr/textAppearanceLarge"
+        android:layout_gravity="center_horizontal"
+        android:paddingBottom="8dp" />
+
+    <!-- Mood selection -->
+    <RadioGroup
+        android:id="@+id/moodOptions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center">
+
+        <RadioButton
+            android:id="@+id/happyOption"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="😊 Happy" />
+
+        <RadioButton
+            android:id="@+id/sadOption"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="😢 Sad" />
+
+        <RadioButton
+            android:id="@+id/neutralOption"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="😐 Neutral" />
+    </RadioGroup>
+
+    <!-- Journal entry -->
+    <EditText
+        android:id="@+id/journalEntry"
+        android:layout_width="match_parent"
+        android:layout_height="150dp"
+        android:hint="Write about your day..."
+        android:gravity="top"
+        android:background="@android:drawable/edit_text"
+        android:padding="8dp"
+        android:inputType="textMultiLine" />
+
+    <!-- Save button -->
+    <Button
+        android:id="@+id/saveMoodButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Save Mood"
+        android:layout_marginTop="12dp" />
+
+</LinearLayout>
