@@ -36,6 +36,13 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Lock
 
 
 // Data Models
@@ -51,7 +58,8 @@ data class UserProfile(
     val experience: String = "",
     val licenseNumber: String = "",
     val certificateUrls: List<String> = emptyList(),
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val authProvider: String = "email" // email, google
 )
 
 data class MoodEntry(
@@ -371,17 +379,76 @@ fun MindSpaceApp(auth: FirebaseAuth, googleSignInClient: GoogleSignInClient) {
     var user by remember { mutableStateOf(auth.currentUser) }
     var userProfile by remember { mutableStateOf<UserProfile?>(null) }
     var isLoading by remember { mutableStateOf(true) }
+    var needsProfileCompletion by remember { mutableStateOf(false) }
+    var isGoogleSignIn by remember { mutableStateOf(false) }
     val db = FirebaseFirestore.getInstance()
 
-    LaunchedEffect(user) {
+    // Listen to auth state changes
+    DisposableEffect(Unit) {
+        val authListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+            user = firebaseAuth.currentUser
+        }
+        auth.addAuthStateListener(authListener)
+        onDispose {
+            auth.removeAuthStateListener(authListener)
+        }
+    }
+
+    // Listen to user profile changes
+    LaunchedEffect(user?.uid) {
+        isLoading = true
         if (user != null) {
-            db.collection("users").document(user!!.uid)
-                .addSnapshotListener { snapshot, _ ->
-                    userProfile = snapshot?.toObject(UserProfile::class.java)
-                    isLoading = false
+            val docRef = db.collection("users").document(user!!.uid)
+
+            // First try to get the document
+            docRef.get().addOnSuccessListener { snapshot ->
+                if (snapshot.exists()) {
+                    val profile = snapshot.toObject(UserProfile::class.java)
+                    userProfile = profile
+
+                    // Check if it's a Google sign-in without profile
+                    isGoogleSignIn = profile?.authProvider == "google"
+
+                    // Check if profile needs completion (psychologist without credentials)
+                    needsProfileCompletion = profile?.role == "psychologist" &&
+                            profile.specializations.isEmpty() &&
+                            profile.licenseNumber.isEmpty()
+                } else {
+                    // Profile doesn't exist - must be Google sign-in
+                    isGoogleSignIn = true
+                    needsProfileCompletion = true
+                    userProfile = null
                 }
+                isLoading = false
+            }.addOnFailureListener {
+                isLoading = false
+                userProfile = null
+                isGoogleSignIn = true
+                needsProfileCompletion = true
+            }
+
+            // Then listen for real-time updates
+            docRef.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    return@addSnapshotListener
+                }
+
+                if (snapshot != null && snapshot.exists()) {
+                    val profile = snapshot.toObject(UserProfile::class.java)
+                    userProfile = profile
+
+                    isGoogleSignIn = profile?.authProvider == "google"
+
+                    needsProfileCompletion = profile?.role == "psychologist" &&
+                            profile.specializations.isEmpty() &&
+                            profile.licenseNumber.isEmpty()
+                }
+            }
         } else {
             isLoading = false
+            userProfile = null
+            needsProfileCompletion = false
+            isGoogleSignIn = false
         }
     }
 
@@ -395,6 +462,7 @@ fun MindSpaceApp(auth: FirebaseAuth, googleSignInClient: GoogleSignInClient) {
             auth.signInWithCredential(credential).addOnCompleteListener {
                 if (it.isSuccessful) {
                     user = auth.currentUser
+                    isGoogleSignIn = true
                 }
             }
         }
@@ -411,34 +479,125 @@ fun MindSpaceApp(auth: FirebaseAuth, googleSignInClient: GoogleSignInClient) {
                 }
             }
             user == null -> {
-                SignInScreen(googleSignInClient, launcher)
+                AuthenticationScreen(
+                    auth = auth,
+                    googleSignInClient = googleSignInClient,
+                    launcher = launcher,
+                    onSignInSuccess = {
+                        // Refresh will happen automatically via auth state listener
+                    }
+                )
             }
-            userProfile == null -> {
-                RoleSelectionScreen(user!!, db) { profile ->
-                    userProfile = profile
+            needsProfileCompletion -> {
+                // If it's a psychologist who registered via email/password, show completion screen
+                if (userProfile?.role == "psychologist" && !isGoogleSignIn) {
+                    PsychologistProfileCompletionScreen(
+                        user = user!!,
+                        existingProfile = userProfile!!,
+                        db = db,
+                        onProfileCompleted = {
+                            needsProfileCompletion = false
+                        }
+                    )
+                }
+                // If it's Google sign-in (no profile exists yet), show role selection
+                else if (isGoogleSignIn) {
+                    RoleSelectionScreen(user!!, db) { profile ->
+                        userProfile = profile
+                        needsProfileCompletion = false
+                        isGoogleSignIn = false
+                    }
+                }
+                // Fallback
+                else {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
                 }
             }
             userProfile?.role == "psychologist" && userProfile?.status == "pending" -> {
-                PendingApprovalScreen(auth, googleSignInClient) { user = null }
-            }
-            userProfile?.role == "psychologist" && userProfile?.status == "rejected" -> {
-                RejectedScreen(auth, googleSignInClient) { user = null }
-            }
-            else -> {
-                MainAppScreen(user!!, userProfile!!, auth, googleSignInClient) {
+                PendingApprovalScreen(auth, googleSignInClient) {
+                    auth.signOut()
                     user = null
                     userProfile = null
+                }
+            }
+            userProfile?.role == "psychologist" && userProfile?.status == "rejected" -> {
+                RejectedScreen(auth, googleSignInClient) {
+                    auth.signOut()
+                    user = null
+                    userProfile = null
+                }
+            }
+            userProfile != null -> {
+                MainAppScreen(user!!, userProfile!!, auth, googleSignInClient) {
+                    auth.signOut()
+                    user = null
+                    userProfile = null
+                }
+            }
+            else -> {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator()
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Loading your profile...")
+                    }
                 }
             }
         }
     }
 }
 
+
+@Composable
+fun AuthenticationScreen(
+    auth: FirebaseAuth,
+    googleSignInClient: GoogleSignInClient,
+    launcher: androidx.activity.result.ActivityResultLauncher<Intent>,
+    onSignInSuccess: () -> Unit
+) {
+    var isRegistering by remember { mutableStateOf(false) }
+
+    if (isRegistering) {
+        RegisterScreen(
+            auth = auth,
+            googleSignInClient = googleSignInClient,
+            launcher = launcher,
+            onBackToSignIn = { isRegistering = false },
+            onRegisterSuccess = onSignInSuccess
+        )
+    } else {
+        SignInScreen(
+            auth = auth,
+            googleSignInClient = googleSignInClient,
+            launcher = launcher,
+            onNavigateToRegister = { isRegistering = true },
+            onSignInSuccess = onSignInSuccess
+        )
+    }
+}
+
 @Composable
 fun SignInScreen(
+    auth: FirebaseAuth,
     googleSignInClient: GoogleSignInClient,
-    launcher: androidx.activity.result.ActivityResultLauncher<Intent>
+    launcher: androidx.activity.result.ActivityResultLauncher<Intent>,
+    onNavigateToRegister: () -> Unit,
+    onSignInSuccess: () -> Unit
 ) {
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var passwordVisible by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -462,20 +621,122 @@ fun SignInScreen(
         )
         Spacer(modifier = Modifier.height(16.dp))
         Text(
-            "Welcome to MindSpace",
+            "Welcome Back",
             style = MaterialTheme.typography.headlineLarge,
             textAlign = TextAlign.Center,
             color = Color(0xFF6750A4)
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            "Your journey to better mental wellness starts here",
+            "Sign in to continue your journey",
             style = MaterialTheme.typography.bodyLarge,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(modifier = Modifier.height(48.dp))
+
+        // Email/Password Sign In
+        OutlinedTextField(
+            value = email,
+            onValueChange = {
+                email = it
+                errorMessage = null
+            },
+            label = { Text("Email") },
+            leadingIcon = { Icon(Icons.Default.Email, "Email") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        OutlinedTextField(
+            value = password,
+            onValueChange = {
+                password = it
+                errorMessage = null
+            },
+            label = { Text("Password") },
+            leadingIcon = { Icon(Icons.Default.Lock, "Password") },
+            trailingIcon = {
+                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                    Icon(
+                        if (passwordVisible) Icons.Default.Info else Icons.Default.Lock,
+                        "Toggle password visibility"
+                    )
+                }
+            },
+            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+
+        if (errorMessage != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                errorMessage!!,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
         Button(
+            onClick = {
+                if (email.isBlank() || password.isBlank()) {
+                    errorMessage = "Please fill in all fields"
+                    return@Button
+                }
+                isLoading = true
+                auth.signInWithEmailAndPassword(email, password)
+                    .addOnSuccessListener {
+                        isLoading = false
+                        onSignInSuccess()
+                    }
+                    .addOnFailureListener { e ->
+                        isLoading = false
+                        errorMessage = when (e.message) {
+                            "The email address is badly formatted." -> "Invalid email format"
+                            "There is no user record corresponding to this identifier. The user may have been deleted." -> "No account found with this email"
+                            "The password is invalid or the user does not have a password." -> "Incorrect password"
+                            else -> "Sign in failed. Please try again."
+                        }
+                    }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            enabled = !isLoading,
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+            } else {
+                Text("Sign In", style = MaterialTheme.typography.titleMedium)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            HorizontalDivider(modifier = Modifier.weight(1f))
+            Text(
+                "  OR  ",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            HorizontalDivider(modifier = Modifier.weight(1f))
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        OutlinedButton(
             onClick = {
                 val signInIntent = googleSignInClient.signInIntent
                 launcher.launch(signInIntent)
@@ -485,9 +746,356 @@ fun SignInScreen(
                 .height(56.dp),
             shape = RoundedCornerShape(16.dp)
         ) {
-            Icon(Icons.Default.Person, "Sign in", modifier = Modifier.size(20.dp))
+            Icon(Icons.Default.Person, "Sign in with Google", modifier = Modifier.size(20.dp))
             Spacer(modifier = Modifier.width(12.dp))
             Text("Sign in with Google", style = MaterialTheme.typography.titleMedium)
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Row {
+            Text(
+                "Don't have an account? ",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Text(
+                "Register",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color(0xFF6750A4),
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                modifier = Modifier.clickable { onNavigateToRegister() }
+            )
+        }
+    }
+}
+
+@Composable
+fun RegisterScreen(
+    auth: FirebaseAuth,
+    googleSignInClient: GoogleSignInClient,
+    launcher: androidx.activity.result.ActivityResultLauncher<Intent>,
+    onBackToSignIn: () -> Unit,
+    onRegisterSuccess: () -> Unit
+) {
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var displayName by remember { mutableStateOf("") }
+    var registerAsPsychologist by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var passwordVisible by remember { mutableStateOf(false) }
+    var confirmPasswordVisible by remember { mutableStateOf(false) }
+
+    val db = FirebaseFirestore.getInstance()
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFFEADDFF),
+                        Color(0xFFFFFBFE)
+                    )
+                )
+            )
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        item {
+            Spacer(modifier = Modifier.height(32.dp))
+            Icon(
+                Icons.Default.Favorite,
+                contentDescription = null,
+                modifier = Modifier.size(80.dp),
+                tint = Color(0xFF6750A4)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                "Create Account",
+                style = MaterialTheme.typography.headlineLarge,
+                textAlign = TextAlign.Center,
+                color = Color(0xFF6750A4)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "Join MindSpace today",
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(32.dp))
+        }
+
+        item {
+            OutlinedTextField(
+                value = displayName,
+                onValueChange = {
+                    displayName = it
+                    errorMessage = null
+                },
+                label = { Text("Full Name") },
+                leadingIcon = { Icon(Icons.Default.Person, "Name") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        item {
+            OutlinedTextField(
+                value = email,
+                onValueChange = {
+                    email = it
+                    errorMessage = null
+                },
+                label = { Text("Email") },
+                leadingIcon = { Icon(Icons.Default.Email, "Email") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        item {
+            OutlinedTextField(
+                value = password,
+                onValueChange = {
+                    password = it
+                    errorMessage = null
+                },
+                label = { Text("Password") },
+                leadingIcon = { Icon(Icons.Default.Lock, "Password") },
+                trailingIcon = {
+                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                        Icon(
+                            if (passwordVisible) Icons.Default.Info else Icons.Default.Lock,
+                            "Toggle password visibility"
+                        )
+                    }
+                },
+                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        item {
+            OutlinedTextField(
+                value = confirmPassword,
+                onValueChange = {
+                    confirmPassword = it
+                    errorMessage = null
+                },
+                label = { Text("Confirm Password") },
+                leadingIcon = { Icon(Icons.Default.Lock, "Confirm Password") },
+                trailingIcon = {
+                    IconButton(onClick = { confirmPasswordVisible = !confirmPasswordVisible }) {
+                        Icon(
+                            if (confirmPasswordVisible) Icons.Default.Info else Icons.Default.Lock,
+                            "Toggle password visibility"
+                        )
+                    }
+                },
+                visualTransformation = if (confirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (registerAsPsychologist)
+                        MaterialTheme.colorScheme.primaryContainer
+                    else
+                        MaterialTheme.colorScheme.surfaceVariant
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { registerAsPsychologist = !registerAsPsychologist }
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = registerAsPsychologist,
+                        onCheckedChange = { registerAsPsychologist = it }
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            "Register as a Psychologist",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            "You'll need to provide credentials for verification",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        if (errorMessage != null) {
+            item {
+                Text(
+                    errorMessage!!,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+
+        item {
+            Button(
+                onClick = {
+                    when {
+                        displayName.isBlank() -> errorMessage = "Please enter your name"
+                        email.isBlank() -> errorMessage = "Please enter your email"
+                        password.isBlank() -> errorMessage = "Please enter a password"
+                        password.length < 6 -> errorMessage = "Password must be at least 6 characters"
+                        password != confirmPassword -> errorMessage = "Passwords do not match"
+                        else -> {
+                            isLoading = true
+                            errorMessage = null
+
+                            auth.createUserWithEmailAndPassword(email, password)
+                                .addOnSuccessListener { authResult ->
+                                    val user = authResult.user
+                                    if (user != null) {
+                                        val profileUpdates = com.google.firebase.auth.UserProfileChangeRequest.Builder()
+                                            .setDisplayName(displayName)
+                                            .build()
+
+                                        user.updateProfile(profileUpdates)
+                                            .addOnSuccessListener {
+                                                // Create user profile in Firestore
+                                                val userProfile = UserProfile(
+                                                    uid = user.uid,
+                                                    email = email,
+                                                    displayName = displayName,
+                                                    photoUrl = "",
+                                                    bio = "",
+                                                    role = if (registerAsPsychologist) "psychologist" else "client",
+                                                    status = if (registerAsPsychologist) "pending" else "active",
+                                                    authProvider = "email"
+                                                )
+
+                                                db.collection("users").document(user.uid)
+                                                    .set(userProfile)
+                                                    .addOnSuccessListener {
+                                                        isLoading = false
+                                                        // Force refresh the auth state
+                                                        auth.currentUser?.reload()?.addOnCompleteListener {
+                                                            onRegisterSuccess()
+                                                        }
+                                                    }
+                                                    .addOnFailureListener { e ->
+                                                        isLoading = false
+                                                        errorMessage = "Failed to create profile: ${e.message}"
+                                                        // If profile creation fails, delete the auth user
+                                                        user.delete()
+                                                    }
+                                            }
+                                            .addOnFailureListener { e ->
+                                                isLoading = false
+                                                errorMessage = "Failed to update profile: ${e.message}"
+                                                user.delete()
+                                            }
+                                    }
+                                }
+                                .addOnFailureListener { e ->
+                                    isLoading = false
+                                    errorMessage = when {
+                                        e.message?.contains("email address is already in use") == true ->
+                                            "Email already registered"
+                                        e.message?.contains("email address is badly formatted") == true ->
+                                            "Invalid email format"
+                                        else -> "Registration failed: ${e.message}"
+                                    }
+                                }
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                enabled = !isLoading,
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    Text("Create Account", style = MaterialTheme.typography.titleMedium)
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                HorizontalDivider(modifier = Modifier.weight(1f))
+                Text(
+                    "  OR  ",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                HorizontalDivider(modifier = Modifier.weight(1f))
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        item {
+            OutlinedButton(
+                onClick = {
+                    val signInIntent = googleSignInClient.signInIntent
+                    launcher.launch(signInIntent)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Icon(Icons.Default.Person, "Sign up with Google", modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(12.dp))
+                Text("Sign up with Google", style = MaterialTheme.typography.titleMedium)
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+
+        item {
+            Row {
+                Text(
+                    "Already have an account? ",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    "Sign In",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFF6750A4),
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                    modifier = Modifier.clickable { onBackToSignIn() }
+                )
+            }
+            Spacer(modifier = Modifier.height(32.dp))
         }
     }
 }
@@ -635,9 +1243,10 @@ fun RoleSelectionScreen(
                         bio = bio,
                         role = selectedRole,
                         status = if (selectedRole == "psychologist") "pending" else "active",
-                        specializations = specializations.split(",").map { it.trim() },
+                        specializations = if (selectedRole == "psychologist") specializations.split(",").map { it.trim() } else emptyList(),
                         experience = experience,
-                        licenseNumber = licenseNumber
+                        licenseNumber = licenseNumber,
+                        authProvider = "google"
                     )
 
                     if (selectedRole == "psychologist" && certificateUris.isNotEmpty()) {
@@ -660,6 +1269,10 @@ fun RoleSelectionScreen(
                                                 isUploading = false
                                                 onProfileCreated(updatedProfile)
                                             }
+                                            .addOnFailureListener {
+                                                isUploading = false
+                                                // Show error
+                                            }
                                     }
                                 }
                             }
@@ -670,6 +1283,10 @@ fun RoleSelectionScreen(
                             .addOnSuccessListener {
                                 isUploading = false
                                 onProfileCreated(profile)
+                            }
+                            .addOnFailureListener {
+                                isUploading = false
+                                // Show error
                             }
                     }
                 },
@@ -689,6 +1306,239 @@ fun RoleSelectionScreen(
                     )
                 } else {
                     Text("Complete Profile")
+                }
+            }
+            Spacer(modifier = Modifier.height(32.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PsychologistProfileCompletionScreen(
+    user: com.google.firebase.auth.FirebaseUser,
+    existingProfile: UserProfile,
+    db: FirebaseFirestore,
+    onProfileCompleted: () -> Unit
+) {
+    var bio by remember { mutableStateOf(existingProfile.bio) }
+    var specializations by remember { mutableStateOf("") }
+    var experience by remember { mutableStateOf("") }
+    var licenseNumber by remember { mutableStateOf("") }
+    var certificateUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var isUploading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val certificatePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        certificateUris = uris
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        item {
+            Spacer(modifier = Modifier.height(32.dp))
+            Icon(
+                Icons.Default.Favorite,
+                contentDescription = null,
+                modifier = Modifier.size(80.dp),
+                tint = Color(0xFF6750A4)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                "Complete Your Profile",
+                style = MaterialTheme.typography.headlineMedium,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "Provide your professional credentials",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(32.dp))
+        }
+
+        item {
+            OutlinedTextField(
+                value = bio,
+                onValueChange = {
+                    bio = it
+                    errorMessage = null
+                },
+                label = { Text("Bio") },
+                placeholder = { Text("Tell us about yourself...") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 3,
+                maxLines = 5
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        item {
+            OutlinedTextField(
+                value = specializations,
+                onValueChange = {
+                    specializations = it
+                    errorMessage = null
+                },
+                label = { Text("Specializations") },
+                placeholder = { Text("e.g., Anxiety, Depression, PTSD") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        item {
+            OutlinedTextField(
+                value = experience,
+                onValueChange = {
+                    experience = it
+                    errorMessage = null
+                },
+                label = { Text("Years of Experience") },
+                placeholder = { Text("e.g., 5") },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        item {
+            OutlinedTextField(
+                value = licenseNumber,
+                onValueChange = {
+                    licenseNumber = it
+                    errorMessage = null
+                },
+                label = { Text("License Number") },
+                placeholder = { Text("Your professional license number") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        item {
+            OutlinedButton(
+                onClick = { certificatePicker.launch("image/*") },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Add, "Upload")
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Upload Certificates (${certificateUris.size})")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "Upload your professional certificates and licenses",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+
+        if (errorMessage != null) {
+            item {
+                Text(
+                    errorMessage!!,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+
+        item {
+            Button(
+                onClick = {
+                    when {
+                        bio.isBlank() -> errorMessage = "Please enter your bio"
+                        specializations.isBlank() -> errorMessage = "Please enter your specializations"
+                        experience.isBlank() -> errorMessage = "Please enter your years of experience"
+                        licenseNumber.isBlank() -> errorMessage = "Please enter your license number"
+                        certificateUris.isEmpty() -> errorMessage = "Please upload at least one certificate"
+                        else -> {
+                            isUploading = true
+                            errorMessage = null
+                            val storage = FirebaseStorage.getInstance()
+                            val uploadedUrls = mutableListOf<String>()
+                            var uploadCount = 0
+                            val totalFiles = certificateUris.size
+
+                            certificateUris.forEachIndexed { index, uri ->
+                                val timestamp = System.currentTimeMillis()
+                                val fileName = "cert_${timestamp}_$index.jpg"
+                                val ref = storage.reference
+                                    .child("certificates/${user.uid}/$fileName")
+
+                                ref.putFile(uri)
+                                    .addOnSuccessListener { taskSnapshot ->
+                                        ref.downloadUrl.addOnSuccessListener { downloadUri ->
+                                            uploadedUrls.add(downloadUri.toString())
+                                            uploadCount++
+
+                                            // Check if all files uploaded
+                                            if (uploadCount == totalFiles) {
+                                                // All uploads complete, update profile
+                                                val updates = hashMapOf<String, Any>(
+                                                    "bio" to bio,
+                                                    "specializations" to specializations.split(",").map { it.trim() },
+                                                    "experience" to experience,
+                                                    "licenseNumber" to licenseNumber,
+                                                    "certificateUrls" to uploadedUrls
+                                                )
+
+                                                db.collection("users").document(user.uid)
+                                                    .update(updates)
+                                                    .addOnSuccessListener {
+                                                        isUploading = false
+                                                        onProfileCompleted()
+                                                    }
+                                                    .addOnFailureListener { e ->
+                                                        isUploading = false
+                                                        errorMessage = "Failed to save profile: ${e.localizedMessage}"
+                                                    }
+                                            }
+                                        }.addOnFailureListener { e ->
+                                            isUploading = false
+                                            errorMessage = "Failed to get download URL: ${e.localizedMessage}"
+                                        }
+                                    }
+                                    .addOnFailureListener { e ->
+                                        isUploading = false
+                                        errorMessage = "Failed to upload certificate: ${e.localizedMessage}"
+                                    }
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                enabled = !isUploading,
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                if (isUploading) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Uploading...")
+                    }
+                } else {
+                    Text("Submit for Approval")
                 }
             }
             Spacer(modifier = Modifier.height(32.dp))
