@@ -45,6 +45,9 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
 
 
+val db = FirebaseFirestore.getInstance()
+
+
 // Data Models
 data class UserProfile(
     val uid: String = "",
@@ -3648,164 +3651,407 @@ fun ProfileScreen(
 
 // ADMIN SCREENS (Complete)
 
-            @Composable
-            fun AdminDashboardScreen() {
-                val db = FirebaseFirestore.getInstance()
-                var totalUsers by remember { mutableStateOf(0) }
-                var totalPsychologists by remember { mutableStateOf(0) }
-                var pendingApprovals by remember { mutableStateOf(0) }
-                var totalSessions by remember { mutableStateOf(0) }
+@Composable
+fun AdminDashboardScreen() {
+    val db = FirebaseFirestore.getInstance()
+    var totalUsers by remember { mutableStateOf(0) }
+    var totalClients by remember { mutableStateOf(0) }
+    var activePsychologists by remember { mutableStateOf(0) }
+    var pendingApprovals by remember { mutableStateOf(0) }
+    var rejectedPsychologists by remember { mutableStateOf(0) }
+    var totalSessions by remember { mutableStateOf(0) }
+    var totalResources by remember { mutableStateOf(0) }
+    var totalSeminars by remember { mutableStateOf(0) }
+    var isLoading by remember { mutableStateOf(true) }
 
-                LaunchedEffect(Unit) {
-                    db.collection("users").addSnapshotListener { snapshot, _ ->
-                        totalUsers = snapshot?.size() ?: 0
-                    }
-                    db.collection("users")
-                        .whereEqualTo("role", "psychologist")
-                        .whereEqualTo("status", "active")
-                        .addSnapshotListener { snapshot, _ ->
-                            totalPsychologists = snapshot?.size() ?: 0
-                        }
-                    db.collection("users")
-                        .whereEqualTo("role", "psychologist")
-                        .whereEqualTo("status", "pending")
-                        .addSnapshotListener { snapshot, _ ->
-                            pendingApprovals = snapshot?.size() ?: 0
-                        }
-                    db.collection("sessions").addSnapshotListener { snapshot, _ ->
-                        totalSessions = snapshot?.size() ?: 0
-                    }
-                }
+    LaunchedEffect(Unit) {
+        // Total users - Real-time listener
+        db.collection("users").addSnapshotListener { snapshot, error ->
+            if (error != null) return@addSnapshotListener
+            totalUsers = snapshot?.size() ?: 0
+            isLoading = false
+        }
 
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    item {
-                        Text(
-                            "Admin Dashboard",
-                            style = MaterialTheme.typography.headlineMedium
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            "Platform Overview",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+        // Total clients
+        db.collection("users")
+            .whereEqualTo("role", "client")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                totalClients = snapshot?.size() ?: 0
+            }
 
-                    item {
+        // Active psychologists
+        db.collection("users")
+            .whereEqualTo("role", "psychologist")
+            .whereEqualTo("status", "active")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                activePsychologists = snapshot?.size() ?: 0
+            }
+
+        // Pending approvals
+        db.collection("users")
+            .whereEqualTo("role", "psychologist")
+            .whereEqualTo("status", "pending")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                pendingApprovals = snapshot?.size() ?: 0
+            }
+
+        // Rejected psychologists
+        db.collection("users")
+            .whereEqualTo("role", "psychologist")
+            .whereEqualTo("status", "rejected")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                rejectedPsychologists = snapshot?.size() ?: 0
+            }
+
+        // Total sessions
+        db.collection("sessions").addSnapshotListener { snapshot, error ->
+            if (error != null) return@addSnapshotListener
+            totalSessions = snapshot?.size() ?: 0
+        }
+
+        // Total resources
+        db.collection("resources").addSnapshotListener { snapshot, error ->
+            if (error != null) return@addSnapshotListener
+            totalResources = snapshot?.size() ?: 0
+        }
+
+        // Total seminars
+        db.collection("seminars").addSnapshotListener { snapshot, error ->
+            if (error != null) return@addSnapshotListener
+            totalSeminars = snapshot?.size() ?: 0
+        }
+    }
+
+    if (isLoading) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator()
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                Text(
+                    "Admin Dashboard",
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "Platform Overview & Statistics",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // Pending Approvals Alert (if any)
+            if (pendingApprovals > 0) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFFFFF3E0)
+                        ),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            StatsCard(
-                                title = "Total Users",
-                                value = totalUsers.toString(),
-                                icon = Icons.Default.Person,
-                                modifier = Modifier.weight(1f)
+                            Icon(
+                                Icons.Default.Info,
+                                contentDescription = null,
+                                modifier = Modifier.size(40.dp),
+                                tint = Color(0xFFF57C00)
                             )
-                            StatsCard(
-                                title = "Psychologists",
-                                value = totalPsychologists.toString(),
-                                icon = Icons.Default.Favorite,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-
-                    item {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            StatsCard(
-                                title = "Pending",
-                                value = pendingApprovals.toString(),
-                                icon = Icons.Default.Info,
-                                modifier = Modifier.weight(1f),
-                                containerColor = Color(0xFFFFF3E0)
-                            )
-                            StatsCard(
-                                title = "Sessions",
-                                value = totalSessions.toString(),
-                                icon = Icons.Default.CalendarToday,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-
-                    item {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer
-                            ),
-                            shape = RoundedCornerShape(16.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(20.dp)) {
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    "Quick Actions",
-                                    style = MaterialTheme.typography.titleLarge
+                                    "⚠️ Action Required",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                    color = Color(0xFFF57C00)
                                 )
-                                Spacer(modifier = Modifier.height(16.dp))
                                 Text(
-                                    "• Review pending psychologist applications",
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    "• Monitor platform activity",
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    "• Manage user accounts",
-                                    style = MaterialTheme.typography.bodyMedium
+                                    "You have $pendingApprovals psychologist${if (pendingApprovals > 1) "s" else ""} waiting for approval",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color(0xFFE65100)
                                 )
                             }
+                            Icon(
+                                Icons.Default.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = Color(0xFFF57C00)
+                            )
                         }
                     }
                 }
             }
 
-            @Composable
-            fun StatsCard(
-                title: String,
-                value: String,
-                icon: androidx.compose.ui.graphics.vector.ImageVector,
-                modifier: Modifier = Modifier,
-                containerColor: Color = MaterialTheme.colorScheme.secondaryContainer
-            ) {
-                Card(
-                    modifier = modifier,
-                    colors = CardDefaults.cardColors(containerColor = containerColor),
-                    shape = RoundedCornerShape(16.dp)
+            // User Statistics Section
+            item {
+                Text(
+                    "User Statistics",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                )
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            icon,
-                            contentDescription = null,
-                            modifier = Modifier.size(32.dp)
+                    DetailedStatsCard(
+                        title = "Total Users",
+                        value = totalUsers.toString(),
+                        icon = Icons.Default.Person,
+                        color = Color(0xFF6750A4),
+                        modifier = Modifier.weight(1f)
+                    )
+                    DetailedStatsCard(
+                        title = "Clients",
+                        value = totalClients.toString(),
+                        icon = Icons.Default.Face,
+                        color = Color(0xFF2196F3),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            // Psychologist Statistics Section
+            item {
+                Text(
+                    "Psychologist Statistics",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                )
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    DetailedStatsCard(
+                        title = "Active",
+                        value = activePsychologists.toString(),
+                        icon = Icons.Default.CheckCircle,
+                        color = Color(0xFF4CAF50),
+                        modifier = Modifier.weight(1f)
+                    )
+                    DetailedStatsCard(
+                        title = "Pending",
+                        value = pendingApprovals.toString(),
+                        icon = Icons.Default.Info,
+                        color = Color(0xFFFFA726),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    DetailedStatsCard(
+                        title = "Rejected",
+                        value = rejectedPsychologists.toString(),
+                        icon = Icons.Default.Close,
+                        color = Color(0xFFF44336),
+                        modifier = Modifier.weight(1f)
+                    )
+                    DetailedStatsCard(
+                        title = "Total Psychologists",
+                        value = (activePsychologists + pendingApprovals + rejectedPsychologists).toString(),
+                        icon = Icons.Default.Favorite,
+                        color = Color(0xFF9C27B0),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            // Platform Activity Section
+            item {
+                Text(
+                    "Platform Activity",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                )
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    DetailedStatsCard(
+                        title = "Sessions",
+                        value = totalSessions.toString(),
+                        icon = Icons.Default.CalendarToday,
+                        color = Color(0xFF00BCD4),
+                        modifier = Modifier.weight(1f)
+                    )
+                    DetailedStatsCard(
+                        title = "Resources",
+                        value = totalResources.toString(),
+                        icon = Icons.Default.ShoppingCart,
+                        color = Color(0xFFFF9800),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            item {
+                DetailedStatsCard(
+                    title = "Seminars",
+                    value = totalSeminars.toString(),
+                    icon = Icons.Default.DateRange,
+                    color = Color(0xFF673AB7),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            // Quick Actions
+            item {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Quick Actions",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                )
+            }
+
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        QuickActionItem(
+                            icon = Icons.Default.CheckCircle,
+                            text = "Review pending psychologist applications",
+                            isHighlight = pendingApprovals > 0
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            value,
-                            style = MaterialTheme.typography.displaySmall
+                        Spacer(modifier = Modifier.height(12.dp))
+                        QuickActionItem(
+                            icon = Icons.Default.Person,
+                            text = "View all user accounts and activity"
                         )
-                        Text(
-                            title,
-                            style = MaterialTheme.typography.bodyMedium,
-                            textAlign = TextAlign.Center
+                        Spacer(modifier = Modifier.height(12.dp))
+                        QuickActionItem(
+                            icon = Icons.Default.CalendarToday,
+                            text = "Monitor sessions and platform usage"
                         )
                     }
                 }
             }
+
+            item {
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun DetailedStatsCard(
+    title: String,
+    value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colors = listOf(
+                            color.copy(alpha = 0.1f),
+                            color.copy(alpha = 0.05f)
+                        )
+                    )
+                )
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(color.copy(alpha = 0.2f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(28.dp),
+                    tint = color
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                value,
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                color = color
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+}
+
+@Composable
+fun QuickActionItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    text: String,
+    isHighlight: Boolean = false
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(24.dp),
+            tint = if (isHighlight) Color(0xFFF57C00) else MaterialTheme.colorScheme.primary
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (isHighlight) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal,
+            color = if (isHighlight) Color(0xFFF57C00) else MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
 
             @Composable
             fun AdminApprovalsScreen() {
