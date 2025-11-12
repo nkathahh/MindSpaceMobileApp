@@ -49,6 +49,8 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 
 
+
+
 val db = FirebaseFirestore.getInstance("mindspacedb")
 // Profile sync function to ensure all auth users have Firestore profiles
 suspend fun ensureUserProfileExists(
