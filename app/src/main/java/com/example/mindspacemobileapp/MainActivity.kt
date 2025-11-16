@@ -47,6 +47,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
+import com.google.firebase.Timestamp
 
 
 
@@ -84,7 +85,7 @@ suspend fun ensureUserProfileExists(
                         role = "client",
                         status = "active",
                         authProvider = if (isGoogleAuth) "google" else "email",
-                        createdAt = System.currentTimeMillis()
+                        createdAt = com.google.firebase.Timestamp.now()
                     )
 
                     println("📝 Attempting to save profile to Firestore...")
@@ -128,7 +129,7 @@ data class UserProfile(
     val experience: String = "",
     val licenseNumber: String = "",
     val certificateUrls: List<String> = emptyList(),
-    val createdAt: Long = System.currentTimeMillis(),
+    val createdAt: com.google.firebase.Timestamp = com.google.firebase.Timestamp.now(),
     val authProvider: String = "email" // email, google
 )
 
@@ -138,7 +139,7 @@ data class MoodEntry(
     val mood: String = "",
     val emoji: String = "",
     val note: String = "",
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: com.google.firebase.Timestamp = com.google.firebase.Timestamp.now()
 )
 
 data class JournalEntry(
@@ -146,7 +147,7 @@ data class JournalEntry(
     val userId: String = "",
     val title: String = "",
     val content: String = "",
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: com.google.firebase.Timestamp = com.google.firebase.Timestamp.now()
 )
 
 data class Session(
@@ -155,7 +156,7 @@ data class Session(
     val psychologistName: String = "",
     val clientId: String = "",
     val clientName: String = "",
-    val date: Long = 0L,
+    val date: com.google.firebase.Timestamp = com.google.firebase.Timestamp.now(),
     val duration: Int = 60, // minutes
     val status: String = "scheduled", // scheduled, completed, cancelled
     val notes: String = "",
@@ -170,7 +171,7 @@ data class Resource(
     val description: String = "",
     val type: String = "", // article, video, exercise
     val url: String = "",
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: com.google.firebase.Timestamp = com.google.firebase.Timestamp.now()
 )
 
 data class Seminar(
@@ -179,7 +180,7 @@ data class Seminar(
     val psychologistName: String = "",
     val title: String = "",
     val description: String = "",
-    val date: Long = 0L,
+    val date: com.google.firebase.Timestamp = com.google.firebase.Timestamp.now(),
     val duration: Int = 90,
     val maxParticipants: Int = 50,
     val registeredUsers: List<String> = emptyList(),
@@ -1060,7 +1061,7 @@ fun RegisterScreen(
                                             role = if (registerAsPsychologist) "psychologist" else "client",
                                             status = if (registerAsPsychologist) "pending" else "active",
                                             authProvider = "email",
-                                            createdAt = System.currentTimeMillis()
+                                            createdAt = com.google.firebase.Timestamp.now()
                                         )
 
                                         // Save to Firestore
@@ -1394,7 +1395,7 @@ fun RoleSelectionScreen(
                                 experience = experience,
                                 licenseNumber = licenseNumber,
                                 authProvider = "google",
-                                createdAt = System.currentTimeMillis()
+                                createdAt = com.google.firebase.Timestamp.now()
                             )
 
                             if (selectedRole == "psychologist" && certificateUris.isNotEmpty()) {
@@ -2428,7 +2429,7 @@ fun MoodTrackerScreen(userId: String) {
                         mood = doc.getString("mood") ?: "",
                         emoji = doc.getString("emoji") ?: "",
                         note = doc.getString("note") ?: "",
-                        timestamp = doc.getLong("timestamp") ?: 0L
+                        timestamp = doc.getTimestamp("timestamp") ?: com.google.firebase.Timestamp.now()
                     )
                 } ?: emptyList()
             }
@@ -2519,7 +2520,7 @@ fun MoodTrackerScreen(userId: String) {
                     "mood" to mood,
                     "emoji" to emoji,
                     "note" to note,
-                    "timestamp" to System.currentTimeMillis()
+                    "timestamp" to com.google.firebase.Timestamp.now()
                 )
                 db.collection("users").document(userId).collection("moods")
                     .add(moodData)
@@ -2604,7 +2605,7 @@ fun MoodEntryCard(
                     Text(entry.mood, style = MaterialTheme.typography.titleMedium)
                     Text(
                         SimpleDateFormat("MMM dd, yyyy - hh:mm a", Locale.getDefault())
-                            .format(Date(entry.timestamp)),
+                            .format(entry.timestamp.toDate()),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -2751,7 +2752,7 @@ fun JournalScreen(userId: String) {
                         userId = userId,
                         title = doc.getString("title") ?: "",
                         content = doc.getString("content") ?: "",
-                        timestamp = doc.getLong("timestamp") ?: 0L
+                        timestamp = doc.getTimestamp("timestamp") ?: com.google.firebase.Timestamp.now()
                     )
                 } ?: emptyList()
             }
@@ -2842,7 +2843,7 @@ fun JournalScreen(userId: String) {
                 val journalData = hashMapOf(
                     "title" to title,
                     "content" to content,
-                    "timestamp" to System.currentTimeMillis()
+                    "timestamp" to com.google.firebase.Timestamp.now()
                 )
                 db.collection("users").document(userId).collection("journals")
                     .add(journalData)
@@ -2942,7 +2943,7 @@ fun JournalEntryCard(
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         SimpleDateFormat("MMM dd, yyyy - hh:mm a", Locale.getDefault())
-                            .format(Date(entry.timestamp)),
+                            .format(entry.timestamp.toDate()),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -2994,7 +2995,7 @@ fun ViewJournalDialog(
                 item {
                     Text(
                         SimpleDateFormat("MMM dd, yyyy - hh:mm a", Locale.getDefault())
-                            .format(Date(entry.timestamp)),
+                            .format(entry.timestamp.toDate()),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -3297,7 +3298,7 @@ fun SessionCard(session: Session, isClient: Boolean) {
                     )
                     Text(
                         SimpleDateFormat("EEEE, MMM dd, yyyy", Locale.getDefault())
-                            .format(Date(session.date)),
+                            .format(session.date.toDate()),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -3714,7 +3715,7 @@ fun SeminarCard(
                 Column {
                     Text(
                         SimpleDateFormat("MMM dd, yyyy - hh:mm a", Locale.getDefault())
-                            .format(Date(seminar.date)),
+                            .format(seminar.date.toDate()),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -4314,7 +4315,7 @@ fun ManualUserCreator(
                                     experience = "",
                                     licenseNumber = "",
                                     certificateUrls = emptyList(),
-                                    createdAt = System.currentTimeMillis(),
+                                    createdAt = com.google.firebase.Timestamp.now(),
                                     authProvider = authProvider
                                 )
 
