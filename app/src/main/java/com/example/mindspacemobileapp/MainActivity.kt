@@ -48,11 +48,14 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import com.google.firebase.Timestamp
-
-
-
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.VpnKey
+import androidx.compose.material.icons.filled.Cancel
 
 val db = FirebaseFirestore.getInstance("mindspacedb")
+
 // Profile sync function to ensure all auth users have Firestore profiles
 suspend fun ensureUserProfileExists(
     user: com.google.firebase.auth.FirebaseUser,
@@ -186,6 +189,182 @@ data class Seminar(
     val registeredUsers: List<String> = emptyList(),
     val meetingLink: String = ""
 )
+
+// --- START OF UNRESOLVED REFERENCE DEFINITIONS ---
+
+@Composable
+fun DetailedStatsCard(
+    title: String,
+    value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colors = listOf(
+                            color.copy(alpha = 0.1f),
+                            color.copy(alpha = 0.05f)
+                        )
+                    )
+                )
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(color.copy(alpha = 0.2f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(28.dp),
+                    tint = color
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                value,
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                color = color
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+}
+
+@Composable
+fun QuickActionItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    text: String,
+    isHighlight: Boolean = false
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(24.dp),
+            tint = if (isHighlight) Color(0xFFF57C00) else MaterialTheme.colorScheme.primary
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (isHighlight) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal,
+            color = if (isHighlight) Color(0xFFF57C00) else MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
+
+@Composable
+fun AdminApprovalsScreen() {
+    val db = FirebaseFirestore.getInstance("mindspacedb")
+    var pendingPsychologists by remember { mutableStateOf<List<UserProfile>>(emptyList()) }
+
+    LaunchedEffect(Unit) {
+        db.collection("users")
+            .whereEqualTo("role", "psychologist")
+            .whereEqualTo("status", "pending")
+            .addSnapshotListener { snapshot, _ ->
+                pendingPsychologists = snapshot?.documents?.mapNotNull { doc ->
+                    doc.toObject(UserProfile::class.java)
+                } ?: emptyList()
+            }
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Text(
+                "Pending Approvals",
+                style = MaterialTheme.typography.headlineMedium
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "Review psychologist applications",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        items(pendingPsychologists) { psychologist ->
+            PsychologistApprovalCard(
+                psychologist = psychologist,
+                onApprove = {
+                    db.collection("users").document(psychologist.uid)
+                        .update("status", "active")
+                },
+                onReject = {
+                    db.collection("users").document(psychologist.uid)
+                        .update("status", "rejected")
+                }
+            )
+        }
+
+        if (pendingPsychologists.isEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 32.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            "No pending approvals",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "All applications have been reviewed",
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// --- END OF UNRESOLVED REFERENCE DEFINITIONS ---
+
+
 @Composable
 fun PendingApprovalScreen(
     auth: FirebaseAuth,
@@ -1194,7 +1373,7 @@ fun RoleSelectionScreen(
     var licenseNumber by remember { mutableStateOf("") }
     var certificateUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var isUploading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }  // ✅ ADD THIS LINE
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     val certificatePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()
@@ -1723,89 +1902,144 @@ fun PsychologistApprovalCard(
     onReject: () -> Unit
 ) {
     var showDetails by remember { mutableStateOf(false) }
+    val context = LocalContext.current // Get Context to launch URL intents
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp)
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(20.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Profile Picture (Placeholder or image)
                 Image(
                     painter = rememberAsyncImagePainter(psychologist.photoUrl),
                     contentDescription = "Profile",
                     modifier = Modifier
                         .size(60.dp)
                         .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
                 )
                 Spacer(modifier = Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         psychologist.displayName,
-                        style = MaterialTheme.typography.titleMedium
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
                     )
                     Text(
                         psychologist.email,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        "License: ${psychologist.licenseNumber}",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 IconButton(onClick = { showDetails = !showDetails }) {
                     Icon(
                         if (showDetails) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                        "Details"
+                        "Details",
+                        tint = MaterialTheme.colorScheme.primary
                     )
                 }
             }
 
-            AnimatedVisibility(visible = showDetails) {
+            AnimatedVisibility(
+                visible = showDetails,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
                 Column {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+
+                    // --- Professional Details Section ---
+                    Text(
+                        "Professional Details:",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Specializations
+                    InfoRow(
+                        icon = Icons.Default.Star,
+                        label = "Specializations",
+                        value = psychologist.specializations.joinToString(", ")
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Experience
+                    InfoRow(
+                        icon = Icons.Default.DateRange,
+                        label = "Experience",
+                        value = "${psychologist.experience} years"
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // License
+                    InfoRow(
+                        icon = Icons.Default.VpnKey,
+                        label = "License Number",
+                        value = psychologist.licenseNumber
+                    )
                     Spacer(modifier = Modifier.height(16.dp))
+
+                    // Bio
                     Text(
                         "Bio:",
-                        style = MaterialTheme.typography.titleSmall
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
                     )
                     Text(
                         psychologist.bio,
-                        style = MaterialTheme.typography.bodyMedium
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        "Specializations:",
-                        style = MaterialTheme.typography.titleSmall
-                    )
-                    Text(
-                        psychologist.specializations.joinToString(", "),
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        "Experience: ${psychologist.experience} years",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        "Certificates:",
-                        style = MaterialTheme.typography.titleSmall
-                    )
-                    psychologist.certificateUrls.forEach { url ->
-                        Text(
-                            "• Certificate attached",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
                     Spacer(modifier = Modifier.height(16.dp))
+
+                    // --- Certificates Section with clickable links ---
+                    Text(
+                        "Certificates & Documents:",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    psychologist.certificateUrls.forEachIndexed { index, url ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    // ACTION: Open the URL in a browser
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                    // Necessary flag when launching activity from a non-activity context
+                                    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                    context.startActivity(intent)
+                                }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.PictureAsPdf,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.tertiary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "Certificate ${index + 1} (Click to View)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.tertiary,
+                                textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    // --- Approval Buttons ---
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         Button(
                             onClick = onApprove,
@@ -1815,7 +2049,7 @@ fun PsychologistApprovalCard(
                             ),
                             shape = RoundedCornerShape(12.dp)
                         ) {
-                            Icon(Icons.Default.CheckCircle, "Approve", modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.CheckCircle, "Approve", modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Approve")
                         }
@@ -1825,9 +2059,10 @@ fun PsychologistApprovalCard(
                             colors = ButtonDefaults.outlinedButtonColors(
                                 contentColor = MaterialTheme.colorScheme.error
                             ),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
                         ) {
-                            Icon(Icons.Default.Close, "Reject", modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Cancel, "Reject", modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Reject")
                         }
@@ -2328,7 +2563,26 @@ fun ClientHomeScreen(userProfile: UserProfile) {
             .limit(3)
             .addSnapshotListener { snapshot, _ ->
                 upcomingSessions = snapshot?.documents?.mapNotNull { doc ->
-                    doc.toObject(Session::class.java)?.copy(id = doc.id)
+                    // FIX: Manual conversion for Session date field to handle old Long data gracefully
+                    val dateValue = doc.get("date")
+                    val dateTimestamp = when (dateValue) {
+                        is com.google.firebase.Timestamp -> dateValue
+                        is Long -> com.google.firebase.Timestamp(Date(dateValue))
+                        else -> com.google.firebase.Timestamp.now() // Fallback
+                    }
+
+                    Session(
+                        id = doc.id,
+                        psychologistId = doc.getString("psychologistId") ?: "",
+                        psychologistName = doc.getString("psychologistName") ?: "",
+                        clientId = doc.getString("clientId") ?: "",
+                        clientName = doc.getString("clientName") ?: "",
+                        date = dateTimestamp,
+                        duration = doc.getLong("duration")?.toInt() ?: 60,
+                        status = doc.getString("status") ?: "scheduled",
+                        notes = doc.getString("notes") ?: "",
+                        meetingLink = doc.getString("meetingLink") ?: ""
+                    )
                 } ?: emptyList()
             }
 
@@ -2336,7 +2590,24 @@ fun ClientHomeScreen(userProfile: UserProfile) {
             .limit(5)
             .addSnapshotListener { snapshot, _ ->
                 resources = snapshot?.documents?.mapNotNull { doc ->
-                    doc.toObject(Resource::class.java)?.copy(id = doc.id)
+                    // FIX: Manual conversion for Resource timestamp field
+                    val timestampValue = doc.get("timestamp")
+                    val timestamp = when (timestampValue) {
+                        is com.google.firebase.Timestamp -> timestampValue
+                        is Long -> com.google.firebase.Timestamp(Date(timestampValue))
+                        else -> com.google.firebase.Timestamp.now()
+                    }
+
+                    Resource(
+                        id = doc.id,
+                        psychologistId = doc.getString("psychologistId") ?: "",
+                        psychologistName = doc.getString("psychologistName") ?: "",
+                        title = doc.getString("title") ?: "",
+                        description = doc.getString("description") ?: "",
+                        type = doc.getString("type") ?: "",
+                        url = doc.getString("url") ?: "",
+                        timestamp = timestamp
+                    )
                 } ?: emptyList()
             }
     }
@@ -2423,13 +2694,21 @@ fun MoodTrackerScreen(userId: String) {
             .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, _ ->
                 moodEntries = snapshot?.documents?.mapNotNull { doc ->
+                    // FIX: Manual conversion for MoodEntry timestamp field to handle old Long data gracefully
+                    val timestampValue = doc.get("timestamp")
+                    val timestamp = when (timestampValue) {
+                        is com.google.firebase.Timestamp -> timestampValue
+                        is Long -> com.google.firebase.Timestamp(Date(timestampValue))
+                        else -> doc.getTimestamp("timestamp") ?: com.google.firebase.Timestamp.now()
+                    }
+
                     MoodEntry(
                         id = doc.id,
                         userId = userId,
                         mood = doc.getString("mood") ?: "",
                         emoji = doc.getString("emoji") ?: "",
                         note = doc.getString("note") ?: "",
-                        timestamp = doc.getTimestamp("timestamp") ?: com.google.firebase.Timestamp.now()
+                        timestamp = timestamp
                     )
                 } ?: emptyList()
             }
@@ -2747,12 +3026,20 @@ fun JournalScreen(userId: String) {
             .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, _ ->
                 journalEntries = snapshot?.documents?.mapNotNull { doc ->
+                    // FIX: Manual conversion for JournalEntry timestamp field to handle old Long data gracefully
+                    val timestampValue = doc.get("timestamp")
+                    val timestamp = when (timestampValue) {
+                        is com.google.firebase.Timestamp -> timestampValue
+                        is Long -> com.google.firebase.Timestamp(Date(timestampValue))
+                        else -> doc.getTimestamp("timestamp") ?: com.google.firebase.Timestamp.now()
+                    }
+
                     JournalEntry(
                         id = doc.id,
                         userId = userId,
                         title = doc.getString("title") ?: "",
                         content = doc.getString("content") ?: "",
-                        timestamp = doc.getTimestamp("timestamp") ?: com.google.firebase.Timestamp.now()
+                        timestamp = timestamp
                     )
                 } ?: emptyList()
             }
@@ -3078,7 +3365,26 @@ fun ClientSessionsScreen(userProfile: UserProfile) {
             .orderBy("date", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, _ ->
                 sessions = snapshot?.documents?.mapNotNull { doc ->
-                    doc.toObject(Session::class.java)?.copy(id = doc.id)
+                    // FIX: Manual conversion for Session date field to handle old Long data gracefully
+                    val dateValue = doc.get("date")
+                    val dateTimestamp = when (dateValue) {
+                        is com.google.firebase.Timestamp -> dateValue
+                        is Long -> com.google.firebase.Timestamp(Date(dateValue))
+                        else -> com.google.firebase.Timestamp.now() // Fallback
+                    }
+
+                    Session(
+                        id = doc.id,
+                        psychologistId = doc.getString("psychologistId") ?: "",
+                        psychologistName = doc.getString("psychologistName") ?: "",
+                        clientId = doc.getString("clientId") ?: "",
+                        clientName = doc.getString("clientName") ?: "",
+                        date = dateTimestamp,
+                        duration = doc.getLong("duration")?.toInt() ?: 60,
+                        status = doc.getString("status") ?: "scheduled",
+                        notes = doc.getString("notes") ?: "",
+                        meetingLink = doc.getString("meetingLink") ?: ""
+                    )
                 } ?: emptyList()
             }
 
@@ -3195,10 +3501,10 @@ fun BookSessionDialog(
     psychologists: List<UserProfile>,
     clientProfile: UserProfile,
     onDismiss: () -> Unit,
-    onBook: (String, String, Long) -> Unit
+    onBook: (String, String, com.google.firebase.Timestamp) -> Unit
 ) {
     var selectedPsych by remember { mutableStateOf<UserProfile?>(null) }
-    var selectedDate by remember { mutableStateOf(System.currentTimeMillis()) }
+    var selectedDate by remember { mutableStateOf(com.google.firebase.Timestamp.now()) }
     var expanded by remember { mutableStateOf(false) }
 
     AlertDialog(
@@ -3345,25 +3651,52 @@ fun PsychologistHomeScreen(userProfile: UserProfile) {
     var totalClients by remember { mutableStateOf(0) }
 
     LaunchedEffect(userProfile.uid) {
-        val startOfDay = Calendar.getInstance().apply {
+        // Since Firestore can't query by Timestamp.toDate().time, we query on the Timestamp field directly.
+        // We calculate the Timestamp range for today.
+        val startOfToday = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
             set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
         }.timeInMillis
 
-        val endOfDay = Calendar.getInstance().apply {
+        val endOfToday = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 23)
             set(Calendar.MINUTE, 59)
             set(Calendar.SECOND, 59)
+            set(Calendar.MILLISECOND, 999)
         }.timeInMillis
+
+        val startTimestamp = com.google.firebase.Timestamp(Date(startOfToday))
+        val endTimestamp = com.google.firebase.Timestamp(Date(endOfToday))
+
 
         db.collection("sessions")
             .whereEqualTo("psychologistId", userProfile.uid)
-            .whereGreaterThanOrEqualTo("date", startOfDay)
-            .whereLessThanOrEqualTo("date", endOfDay)
+            .whereGreaterThanOrEqualTo("date", startTimestamp)
+            .whereLessThanOrEqualTo("date", endTimestamp)
             .addSnapshotListener { snapshot, _ ->
                 todaySessions = snapshot?.documents?.mapNotNull { doc ->
-                    doc.toObject(Session::class.java)?.copy(id = doc.id)
+                    // FIX: Manual conversion for Session date field to handle old Long data gracefully
+                    val dateValue = doc.get("date")
+                    val dateTimestamp = when (dateValue) {
+                        is com.google.firebase.Timestamp -> dateValue
+                        is Long -> com.google.firebase.Timestamp(Date(dateValue))
+                        else -> com.google.firebase.Timestamp.now() // Fallback
+                    }
+
+                    Session(
+                        id = doc.id,
+                        psychologistId = doc.getString("psychologistId") ?: "",
+                        psychologistName = doc.getString("psychologistName") ?: "",
+                        clientId = doc.getString("clientId") ?: "",
+                        clientName = doc.getString("clientName") ?: "",
+                        date = dateTimestamp,
+                        duration = doc.getLong("duration")?.toInt() ?: 60,
+                        status = doc.getString("status") ?: "scheduled",
+                        notes = doc.getString("notes") ?: "",
+                        meetingLink = doc.getString("meetingLink") ?: ""
+                    )
                 } ?: emptyList()
             }
 
@@ -3482,7 +3815,26 @@ fun PsychologistSessionsScreen(userProfile: UserProfile) {
             .orderBy("date", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, _ ->
                 sessions = snapshot?.documents?.mapNotNull { doc ->
-                    doc.toObject(Session::class.java)?.copy(id = doc.id)
+                    // FIX: Manual conversion for Session date field to handle old Long data gracefully
+                    val dateValue = doc.get("date")
+                    val dateTimestamp = when (dateValue) {
+                        is com.google.firebase.Timestamp -> dateValue
+                        is Long -> com.google.firebase.Timestamp(Date(dateValue))
+                        else -> com.google.firebase.Timestamp.now() // Fallback
+                    }
+
+                    Session(
+                        id = doc.id,
+                        psychologistId = doc.getString("psychologistId") ?: "",
+                        psychologistName = doc.getString("psychologistName") ?: "",
+                        clientId = doc.getString("clientId") ?: "",
+                        clientName = doc.getString("clientName") ?: "",
+                        date = dateTimestamp,
+                        duration = doc.getLong("duration")?.toInt() ?: 60,
+                        status = doc.getString("status") ?: "scheduled",
+                        notes = doc.getString("notes") ?: "",
+                        meetingLink = doc.getString("meetingLink") ?: ""
+                    )
                 } ?: emptyList()
             }
     }
@@ -3550,23 +3902,38 @@ fun SeminarsScreen(userProfile: UserProfile) {
     var showDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        if (userProfile.role == "psychologist") {
+        val query = if (userProfile.role == "psychologist") {
             db.collection("seminars")
                 .whereEqualTo("psychologistId", userProfile.uid)
                 .orderBy("date", com.google.firebase.firestore.Query.Direction.DESCENDING)
-                .addSnapshotListener { snapshot, _ ->
-                    seminars = snapshot?.documents?.mapNotNull { doc ->
-                        doc.toObject(Seminar::class.java)?.copy(id = doc.id)
-                    } ?: emptyList()
-                }
         } else {
             db.collection("seminars")
                 .orderBy("date", com.google.firebase.firestore.Query.Direction.DESCENDING)
-                .addSnapshotListener { snapshot, _ ->
-                    seminars = snapshot?.documents?.mapNotNull { doc ->
-                        doc.toObject(Seminar::class.java)?.copy(id = doc.id)
-                    } ?: emptyList()
+        }
+
+        query.addSnapshotListener { snapshot, _ ->
+            seminars = snapshot?.documents?.mapNotNull { doc ->
+                // FIX: Manual conversion for Seminar date field to handle old Long data gracefully
+                val dateValue = doc.get("date")
+                val dateTimestamp = when (dateValue) {
+                    is com.google.firebase.Timestamp -> dateValue
+                    is Long -> com.google.firebase.Timestamp(Date(dateValue))
+                    else -> com.google.firebase.Timestamp.now() // Fallback
                 }
+
+                Seminar(
+                    id = doc.id,
+                    psychologistId = doc.getString("psychologistId") ?: "",
+                    psychologistName = doc.getString("psychologistName") ?: "",
+                    title = doc.getString("title") ?: "",
+                    description = doc.getString("description") ?: "",
+                    date = dateTimestamp,
+                    duration = doc.getLong("duration")?.toInt() ?: 90,
+                    maxParticipants = doc.getLong("maxParticipants")?.toInt() ?: 50,
+                    registeredUsers = doc.get("registeredUsers") as? List<String> ?: emptyList(),
+                    meetingLink = doc.getString("meetingLink") ?: ""
+                )
+            } ?: emptyList()
         }
     }
 
@@ -3750,7 +4117,7 @@ fun SeminarCard(
 fun CreateSeminarDialog(
     userProfile: UserProfile,
     onDismiss: () -> Unit,
-    onCreate: (String, String, Long, Int, Int) -> Unit
+    onCreate: (String, String, com.google.firebase.Timestamp, Int, Int) -> Unit
 ) {
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
@@ -3800,7 +4167,7 @@ fun CreateSeminarDialog(
                     onCreate(
                         title,
                         description,
-                        System.currentTimeMillis() + (24 * 60 * 60 * 1000),
+                        com.google.firebase.Timestamp.now(),
                         duration.toIntOrNull() ?: 90,
                         maxParticipants.toIntOrNull() ?: 50
                     )
@@ -3826,23 +4193,36 @@ fun ResourcesScreen(userProfile: UserProfile) {
     var showDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        if (userProfile.role == "psychologist") {
+        val query = if (userProfile.role == "psychologist") {
             db.collection("resources")
                 .whereEqualTo("psychologistId", userProfile.uid)
                 .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
-                .addSnapshotListener { snapshot, _ ->
-                    resources = snapshot?.documents?.mapNotNull { doc ->
-                        doc.toObject(Resource::class.java)?.copy(id = doc.id)
-                    } ?: emptyList()
-                }
         } else {
             db.collection("resources")
                 .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
-                .addSnapshotListener { snapshot, _ ->
-                    resources = snapshot?.documents?.mapNotNull { doc ->
-                        doc.toObject(Resource::class.java)?.copy(id = doc.id)
-                    } ?: emptyList()
+        }
+
+        query.addSnapshotListener { snapshot, _ ->
+            resources = snapshot?.documents?.mapNotNull { doc ->
+                // FIX: Manual conversion for Resource timestamp field to handle old Long data gracefully
+                val timestampValue = doc.get("timestamp")
+                val timestamp = when (timestampValue) {
+                    is com.google.firebase.Timestamp -> timestampValue
+                    is Long -> com.google.firebase.Timestamp(Date(timestampValue))
+                    else -> com.google.firebase.Timestamp.now()
                 }
+
+                Resource(
+                    id = doc.id,
+                    psychologistId = doc.getString("psychologistId") ?: "",
+                    psychologistName = doc.getString("psychologistName") ?: "",
+                    title = doc.getString("title") ?: "",
+                    description = doc.getString("description") ?: "",
+                    type = doc.getString("type") ?: "",
+                    url = doc.getString("url") ?: "",
+                    timestamp = timestamp
+                )
+            } ?: emptyList()
         }
     }
 
@@ -3933,7 +4313,7 @@ fun ResourcesScreen(userProfile: UserProfile) {
                     "description" to description,
                     "type" to type,
                     "url" to url,
-                    "timestamp" to System.currentTimeMillis()
+                    "timestamp" to com.google.firebase.Timestamp.now()
                 )
                 db.collection("resources").add(resource)
                 showDialog = false
@@ -4749,176 +5129,6 @@ fun AdminDashboardScreen() {
 
             item {
                 Spacer(modifier = Modifier.height(16.dp))
-            }
-        }
-    }
-}
-
-@Composable
-fun DetailedStatsCard(
-    title: String,
-    value: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    color: Color,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                        colors = listOf(
-                            color.copy(alpha = 0.1f),
-                            color.copy(alpha = 0.05f)
-                        )
-                    )
-                )
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .background(color.copy(alpha = 0.2f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(28.dp),
-                    tint = color
-                )
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                value,
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                color = color
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                title,
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        }
-    }
-}
-
-@Composable
-fun QuickActionItem(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    text: String,
-    isHighlight: Boolean = false
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            modifier = Modifier.size(24.dp),
-            tint = if (isHighlight) Color(0xFFF57C00) else MaterialTheme.colorScheme.primary
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Text(
-            text,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = if (isHighlight) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal,
-            color = if (isHighlight) Color(0xFFF57C00) else MaterialTheme.colorScheme.onSurface
-        )
-    }
-}
-
-@Composable
-fun AdminApprovalsScreen() {
-    val db = FirebaseFirestore.getInstance("mindspacedb")
-    var pendingPsychologists by remember { mutableStateOf<List<UserProfile>>(emptyList()) }
-
-    LaunchedEffect(Unit) {
-        db.collection("users")
-            .whereEqualTo("role", "psychologist")
-            .whereEqualTo("status", "pending")
-            .addSnapshotListener { snapshot, _ ->
-                pendingPsychologists = snapshot?.documents?.mapNotNull { doc ->
-                    doc.toObject(UserProfile::class.java)
-                } ?: emptyList()
-            }
-    }
-
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        item {
-            Text(
-                "Pending Approvals",
-                style = MaterialTheme.typography.headlineMedium
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                "Review psychologist applications",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-
-        items(pendingPsychologists) { psychologist ->
-            PsychologistApprovalCard(
-                psychologist = psychologist,
-                onApprove = {
-                    db.collection("users").document(psychologist.uid)
-                        .update("status", "active")
-                },
-                onReject = {
-                    db.collection("users").document(psychologist.uid)
-                        .update("status", "rejected")
-                }
-            )
-        }
-
-        if (pendingPsychologists.isEmpty()) {
-            item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 32.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier.padding(32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            modifier = Modifier.size(48.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            "No pending approvals",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            "All applications have been reviewed",
-                            textAlign = TextAlign.Center,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
             }
         }
     }
