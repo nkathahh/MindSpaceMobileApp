@@ -53,6 +53,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.unit.dp
+import coil.compose.rememberAsyncImagePainter
+import java.util.*
 
 val db = FirebaseFirestore.getInstance("mindspacedb")
 
@@ -190,7 +199,42 @@ data class Seminar(
     val meetingLink: String = ""
 )
 
-// --- START OF UNRESOLVED REFERENCE DEFINITIONS ---
+
+
+fun getDailyQuote(quotes: List<String>): String {
+    // Get the day of the year (1-366) as a consistent seed
+    val calendar = Calendar.getInstance()
+    val dayOfYear = calendar.get(Calendar.DAY_OF_YEAR)
+
+    val index = dayOfYear % quotes.size
+
+    return quotes[index]
+}
+
+data class SessionRequest(
+    val id: String = "",
+    val clientId: String = "",
+    val clientName: String = "",
+    val psychologistId: String = "",
+    val psychologistName: String = "",
+    val requestedDate: com.google.firebase.Timestamp = com.google.firebase.Timestamp.now(),
+    val duration: Int = 60,
+    val status: String = "pending", // pending, approved, rejected, cancelled
+    val clientNotes: String = "",
+    val psychologistResponse: String = "",
+    val finalDate: com.google.firebase.Timestamp? = null,
+    val createdAt: com.google.firebase.Timestamp = com.google.firebase.Timestamp.now()
+)
+
+data class AvailableSlot(
+    val id: String = "",
+    val psychologistId: String = "",
+    val date: com.google.firebase.Timestamp = com.google.firebase.Timestamp.now(),
+    val duration: Int = 60,
+    val isBooked: Boolean = false,
+    val bookedBy: String = ""
+)
+
 
 @Composable
 fun DetailedStatsCard(
@@ -246,6 +290,315 @@ fun DetailedStatsCard(
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurface
             )
+        }
+    }
+}
+@Composable
+fun UserCard(
+    userProfile: UserProfile,
+    onUpdateStatus: (String, String) -> Unit,
+    onDelete: (String) -> Unit
+) {
+    var showDetails by remember { mutableStateOf(false) }
+    val isPsychologist = userProfile.role == "psychologist"
+    val isAccountActive = userProfile.status == "active"
+    // Requires java.util.Locale import
+    val cardColor = if (isAccountActive) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = cardColor)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Icon/Avatar Placeholder
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        if (isPsychologist) Icons.Default.Favorite else Icons.Default.Face,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+
+                // User Info
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        userProfile.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        userProfile.email,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "Status: ${userProfile.status.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isAccountActive) Color(0xFF388E3C) else MaterialTheme.colorScheme.error
+                    )
+                }
+
+                // Details Toggle
+                IconButton(onClick = { showDetails = !showDetails }) {
+                    Icon(
+                        if (showDetails) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        "Details",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+
+            AnimatedVisibility(
+                visible = showDetails,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column(modifier = Modifier.padding(top = 12.dp)) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                    // Bio
+                    Text("Bio:", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    Text(userProfile.bio.ifEmpty { "No bio provided" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                    if (isPsychologist) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Specializations:", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                        Text(userProfile.specializations.joinToString(", ").ifEmpty { "N/A" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("License:", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                        Text(userProfile.licenseNumber.ifEmpty { "N/A" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Action Buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                val newStatus = if (isAccountActive) "deactivated" else "active"
+                                onUpdateStatus(userProfile.uid, newStatus)
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isAccountActive) MaterialTheme.colorScheme.error else Color(0xFF4CAF50)
+                            )
+                        ) {
+                            Text(if (isAccountActive) "Deactivate" else "Activate")
+                        }
+                        OutlinedButton(
+                            onClick = { onDelete(userProfile.uid) },
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            ),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                        ) {
+                            Icon(Icons.Default.Delete, "Delete")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun QuickLinkCard(
+    modifier: Modifier = Modifier, // MODIFIER PARAMETER MUST BE THE FIRST ARGUMENT
+    title: String,
+    value: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    color: Color
+) {
+    Card(
+        modifier = modifier // Apply the external modifier (including weight) here
+            .height(150.dp)
+            .clickable { /* Handle navigation to Mood/Journal screen */ },
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = color,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    title,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                value,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.weight(1f)) // Push subtitle to bottom
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+}
+
+@Composable
+fun EmptyStateCard(
+    message: String,
+    actionText: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onAction: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        ),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(24.dp)
+                .fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                modifier = Modifier.size(36.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                message,
+                style = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            OutlinedButton(onClick = onAction) {
+                Text(actionText)
+            }
+        }
+    }
+}
+
+
+@Composable
+fun AdminUserManagementScreen() {
+    val db = FirebaseFirestore.getInstance("mindspacedb")
+    var allUsers by remember { mutableStateOf<List<UserProfile>>(emptyList()) }
+
+    LaunchedEffect(Unit) {
+        db.collection("users")
+            .orderBy("role", com.google.firebase.firestore.Query.Direction.ASCENDING)
+            .addSnapshotListener { snapshot, _ ->
+                allUsers = snapshot?.documents?.mapNotNull { doc ->
+                    // FIX: Manual conversion for createdAt field to handle old Long data gracefully
+                    val createdAtValue = doc.get("createdAt")
+                    val createdAtTimestamp = when (createdAtValue) {
+                        is com.google.firebase.Timestamp -> createdAtValue
+                        is Long -> com.google.firebase.Timestamp(Date(createdAtValue))
+                        else -> com.google.firebase.Timestamp.now() // Fallback
+                    }
+
+                    // Manually map fields (mandatory because the primary model field 'createdAt' has old data)
+                    val profile = UserProfile(
+                        uid = doc.getString("uid") ?: "",
+                        email = doc.getString("email") ?: "",
+                        displayName = doc.getString("displayName") ?: "",
+                        photoUrl = doc.getString("photoUrl") ?: "",
+                        bio = doc.getString("bio") ?: "",
+                        role = doc.getString("role") ?: "client",
+                        status = doc.getString("status") ?: "active",
+                        specializations = doc.get("specializations") as? List<String> ?: emptyList(),
+                        experience = doc.getString("experience") ?: "",
+                        licenseNumber = doc.getString("licenseNumber") ?: "",
+                        certificateUrls = doc.get("certificateUrls") as? List<String> ?: emptyList(),
+                        createdAt = createdAtTimestamp, // Use the converted Timestamp
+                        authProvider = doc.getString("authProvider") ?: "email"
+                    )
+                    profile // Return the manually constructed profile
+                }?.filter { it.role != "admin" } ?: emptyList()
+            }
+    }
+
+    // Function to update user status (deactivate/activate)
+    val onUpdateStatus: (String, String) -> Unit = { uid, newStatus ->
+        db.collection("users").document(uid).update("status", newStatus)
+    }
+
+    // Function to delete user (Note: This only deletes the Firestore profile, not Firebase Auth user)
+    val onDeleteUser: (String) -> Unit = { uid ->
+        db.collection("users").document(uid).delete()
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Text(
+                "User Management",
+                style = MaterialTheme.typography.headlineMedium
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "View, manage, and moderate all platform users (excluding admins).",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        items(allUsers) { userProfile ->
+            UserCard(
+                userProfile = userProfile,
+                onUpdateStatus = onUpdateStatus,
+                onDelete = onDeleteUser
+            )
+        }
+
+        if (allUsers.isEmpty()) {
+            item {
+                Text(
+                    "No non-admin users found.",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                    textAlign = TextAlign.Center
+                )
+            }
         }
     }
 }
@@ -547,6 +900,14 @@ fun MainAppScreen(
                             selected = currentScreen == "approvals",
                             onClick = { currentScreen = "approvals" }
                         )
+                        // --- NEW ADMIN ITEM START ---
+                        NavigationBarItem(
+                            icon = { Icon(Icons.Default.Group, "Users") },
+                            label = { Text("Users") },
+                            selected = currentScreen == "users",
+                            onClick = { currentScreen = "users" }
+                        )
+                        // --- NEW ADMIN ITEM END ---
                         NavigationBarItem(
                             icon = { Icon(Icons.Default.Person, "Profile") },
                             label = { Text("Profile") },
@@ -582,6 +943,7 @@ fun MainAppScreen(
                     when (currentScreen) {
                         "home" -> AdminDashboardScreen()
                         "approvals" -> AdminApprovalsScreen()
+                        "users" -> AdminUserManagementScreen()
                         "profile" -> ProfileScreen(user, userProfile, auth, googleSignInClient, onSignOut)
                     }
                 }
@@ -2540,37 +2902,42 @@ fun InfoRow(
 
 @Composable
 fun ClientHomeScreen(userProfile: UserProfile) {
-    val motivationalQuotes = listOf(
-        "Every day is a fresh start. 🌅",
-        "You are stronger than you think. 💪",
-        "Progress, not perfection. 🌱",
-        "Be kind to yourself today. 💚",
-        "Your mental health matters. 🧠",
-        "Take it one step at a time. 👣",
-        "You've got this! ⭐",
-        "Breathe in peace, breathe out stress. 🌬️"
-    )
-
-    val quote = remember { motivationalQuotes.random() }
     val db = FirebaseFirestore.getInstance("mindspacedb")
     var upcomingSessions by remember { mutableStateOf<List<Session>>(emptyList()) }
+    var latestMood by remember { mutableStateOf<MoodEntry?>(null) }
+    var latestJournal by remember { mutableStateOf<JournalEntry?>(null) }
     var resources by remember { mutableStateOf<List<Resource>>(emptyList()) }
 
+    // Use the function to get a quote that is constant for the day
+    val motivationalQuotes = remember {
+        listOf(
+            "Every day is a fresh start. 🌅",
+            "You are stronger than you think. 💪",
+            "Progress, not perfection. 🌱",
+            "Be kind to yourself today. 💚",
+            "Your mental health matters. 🧠",
+            "Take it one step at a time. 👣",
+            "You've got this! ⭐",
+            "Breathe in peace, breathe out stress. 🌬️"
+        )
+    }
+    val dailyQuote = remember { getDailyQuote(motivationalQuotes) }
+
     LaunchedEffect(userProfile.uid) {
+        // Fetch Upcoming Sessions (Manual Deserialization for robustness)
         db.collection("sessions")
             .whereEqualTo("clientId", userProfile.uid)
             .whereEqualTo("status", "scheduled")
+            .orderBy("date", com.google.firebase.firestore.Query.Direction.ASCENDING)
             .limit(3)
             .addSnapshotListener { snapshot, _ ->
                 upcomingSessions = snapshot?.documents?.mapNotNull { doc ->
-                    // FIX: Manual conversion for Session date field to handle old Long data gracefully
                     val dateValue = doc.get("date")
                     val dateTimestamp = when (dateValue) {
                         is com.google.firebase.Timestamp -> dateValue
                         is Long -> com.google.firebase.Timestamp(Date(dateValue))
-                        else -> com.google.firebase.Timestamp.now() // Fallback
+                        else -> com.google.firebase.Timestamp.now()
                     }
-
                     Session(
                         id = doc.id,
                         psychologistId = doc.getString("psychologistId") ?: "",
@@ -2586,18 +2953,63 @@ fun ClientHomeScreen(userProfile: UserProfile) {
                 } ?: emptyList()
             }
 
-        db.collection("resources")
-            .limit(5)
+        // Fetch Latest Mood Entry (Manual Deserialization for robustness)
+        db.collection("users").document(userProfile.uid).collection("moods")
+            .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .limit(1)
             .addSnapshotListener { snapshot, _ ->
-                resources = snapshot?.documents?.mapNotNull { doc ->
-                    // FIX: Manual conversion for Resource timestamp field
+                latestMood = snapshot?.documents?.mapNotNull { doc ->
                     val timestampValue = doc.get("timestamp")
                     val timestamp = when (timestampValue) {
                         is com.google.firebase.Timestamp -> timestampValue
                         is Long -> com.google.firebase.Timestamp(Date(timestampValue))
                         else -> com.google.firebase.Timestamp.now()
                     }
+                    MoodEntry(
+                        id = doc.id,
+                        userId = userProfile.uid,
+                        mood = doc.getString("mood") ?: "",
+                        emoji = doc.getString("emoji") ?: "",
+                        note = doc.getString("note") ?: "",
+                        timestamp = timestamp
+                    )
+                }?.firstOrNull()
+            }
 
+        // Fetch Latest Journal Entry (Manual Deserialization for robustness)
+        db.collection("users").document(userProfile.uid).collection("journals")
+            .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .limit(1)
+            .addSnapshotListener { snapshot, _ ->
+                latestJournal = snapshot?.documents?.mapNotNull { doc ->
+                    val timestampValue = doc.get("timestamp")
+                    val timestamp = when (timestampValue) {
+                        is com.google.firebase.Timestamp -> timestampValue
+                        is Long -> com.google.firebase.Timestamp(Date(timestampValue))
+                        else -> com.google.firebase.Timestamp.now()
+                    }
+                    JournalEntry(
+                        id = doc.id,
+                        userId = userProfile.uid,
+                        title = doc.getString("title") ?: "",
+                        content = doc.getString("content") ?: "",
+                        timestamp = timestamp
+                    )
+                }?.firstOrNull()
+            }
+
+
+        // Fetch Top Resources
+        db.collection("resources")
+            .limit(3)
+            .addSnapshotListener { snapshot, _ ->
+                resources = snapshot?.documents?.mapNotNull { doc ->
+                    val timestampValue = doc.get("timestamp")
+                    val timestamp = when (timestampValue) {
+                        is com.google.firebase.Timestamp -> timestampValue
+                        is Long -> com.google.firebase.Timestamp(Date(timestampValue))
+                        else -> com.google.firebase.Timestamp.now()
+                    }
                     Resource(
                         id = doc.id,
                         psychologistId = doc.getString("psychologistId") ?: "",
@@ -2618,55 +3030,115 @@ fun ClientHomeScreen(userProfile: UserProfile) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // 1. Welcome Header
         item {
-            Text(
-                "Welcome back, ${userProfile.displayName.split(" ").first()}! 👋",
-                style = MaterialTheme.typography.headlineMedium
-            )
+            Column(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    "Welcome back, ${userProfile.displayName.split(" ").first()}!",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "Your path to wellness.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
         }
 
+        // 2. Daily Motivation Card (Modern, fixed-daily content)
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 ),
-                shape = RoundedCornerShape(20.dp)
+                shape = RoundedCornerShape(20.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
             ) {
                 Column(
                     modifier = Modifier.padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        "Daily Motivation",
-                        style = MaterialTheme.typography.titleMedium
+                        "Quote of the Day",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        quote,
+                        dailyQuote,
                         style = MaterialTheme.typography.headlineSmall,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
             }
         }
 
-        if (upcomingSessions.isNotEmpty()) {
-            item {
-                Text(
-                    "Upcoming Sessions",
-                    style = MaterialTheme.typography.titleLarge
+        // 3. Wellness Summary Cards (Side-by-side metrics)
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Latest Mood Quick View
+                QuickLinkCard(
+                    title = "My Latest Mood",
+                    value = latestMood?.emoji ?: "❓",
+                    subtitle = latestMood?.mood ?: "No Entry Today",
+                    icon = Icons.Default.Face,
+                    color = MaterialTheme.colorScheme.secondary
                 )
-            }
-            items(upcomingSessions) { session ->
-                SessionCard(session, isClient = true)
+
+                // Latest Journal Quick View
+                QuickLinkCard(
+                    title = "My Latest Entry",
+                    value = latestJournal?.title ?: "✍️",
+                    subtitle = latestJournal?.title?.take(15) + if ((latestJournal?.title?.length ?: 0) > 15) "..." else "" ?: "Write Something",
+                    icon = Icons.Default.Edit,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
             }
         }
 
+        // 4. Upcoming Sessions
         item {
             Text(
-                "Helpful Resources",
-                style = MaterialTheme.typography.titleLarge
+                "Upcoming Sessions",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        }
+
+        if (upcomingSessions.isNotEmpty()) {
+            items(upcomingSessions) { session ->
+                SessionCard(session, isClient = true)
+            }
+        } else {
+            item {
+                EmptyStateCard(
+                    message = "You have no scheduled sessions.",
+                    actionText = "Book a Session",
+                    icon = Icons.Default.CalendarToday,
+                    onAction = { /* TODO: Navigate to Sessions screen */ }
+                )
+            }
+        }
+
+        // 5. Featured Resources
+        item {
+            Text(
+                "Featured Resources",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 8.dp)
             )
         }
 
@@ -3648,11 +4120,13 @@ fun SessionCard(session: Session, isClient: Boolean) {
 fun PsychologistHomeScreen(userProfile: UserProfile) {
     val db = FirebaseFirestore.getInstance("mindspacedb")
     var todaySessions by remember { mutableStateOf<List<Session>>(emptyList()) }
+    var upcomingSessions by remember { mutableStateOf<List<Session>>(emptyList()) }
     var totalClients by remember { mutableStateOf(0) }
+    var completedSessionsThisWeek by remember { mutableStateOf(0) }
+    var isLoading by remember { mutableStateOf(true) }
 
     LaunchedEffect(userProfile.uid) {
-        // Since Firestore can't query by Timestamp.toDate().time, we query on the Timestamp field directly.
-        // We calculate the Timestamp range for today.
+        // Get today's date range
         val startOfToday = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
@@ -3670,21 +4144,19 @@ fun PsychologistHomeScreen(userProfile: UserProfile) {
         val startTimestamp = com.google.firebase.Timestamp(Date(startOfToday))
         val endTimestamp = com.google.firebase.Timestamp(Date(endOfToday))
 
-
+        // Today's sessions
         db.collection("sessions")
             .whereEqualTo("psychologistId", userProfile.uid)
             .whereGreaterThanOrEqualTo("date", startTimestamp)
             .whereLessThanOrEqualTo("date", endTimestamp)
             .addSnapshotListener { snapshot, _ ->
                 todaySessions = snapshot?.documents?.mapNotNull { doc ->
-                    // FIX: Manual conversion for Session date field to handle old Long data gracefully
                     val dateValue = doc.get("date")
                     val dateTimestamp = when (dateValue) {
                         is com.google.firebase.Timestamp -> dateValue
                         is Long -> com.google.firebase.Timestamp(Date(dateValue))
-                        else -> com.google.firebase.Timestamp.now() // Fallback
+                        else -> com.google.firebase.Timestamp.now()
                     }
-
                     Session(
                         id = doc.id,
                         psychologistId = doc.getString("psychologistId") ?: "",
@@ -3697,109 +4169,526 @@ fun PsychologistHomeScreen(userProfile: UserProfile) {
                         notes = doc.getString("notes") ?: "",
                         meetingLink = doc.getString("meetingLink") ?: ""
                     )
-                } ?: emptyList()
+                }?.sortedBy { it.date.toDate() } ?: emptyList()
+                isLoading = false
             }
 
+        // Upcoming sessions (next 7 days, excluding today)
+        val tomorrowStart = Calendar.getInstance().apply {
+            add(Calendar.DAY_OF_YEAR, 1)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+        }.timeInMillis
+
+        val next7Days = Calendar.getInstance().apply {
+            add(Calendar.DAY_OF_YEAR, 7)
+            set(Calendar.HOUR_OF_DAY, 23)
+            set(Calendar.MINUTE, 59)
+            set(Calendar.SECOND, 59)
+        }.timeInMillis
+
+        db.collection("sessions")
+            .whereEqualTo("psychologistId", userProfile.uid)
+            .whereGreaterThanOrEqualTo("date", com.google.firebase.Timestamp(Date(tomorrowStart)))
+            .whereLessThanOrEqualTo("date", com.google.firebase.Timestamp(Date(next7Days)))
+            .addSnapshotListener { snapshot, _ ->
+                upcomingSessions = snapshot?.documents?.mapNotNull { doc ->
+                    val dateValue = doc.get("date")
+                    val dateTimestamp = when (dateValue) {
+                        is com.google.firebase.Timestamp -> dateValue
+                        is Long -> com.google.firebase.Timestamp(Date(dateValue))
+                        else -> com.google.firebase.Timestamp.now()
+                    }
+                    Session(
+                        id = doc.id,
+                        psychologistId = doc.getString("psychologistId") ?: "",
+                        psychologistName = doc.getString("psychologistName") ?: "",
+                        clientId = doc.getString("clientId") ?: "",
+                        clientName = doc.getString("clientName") ?: "",
+                        date = dateTimestamp,
+                        duration = doc.getLong("duration")?.toInt() ?: 60,
+                        status = doc.getString("status") ?: "scheduled",
+                        notes = doc.getString("notes") ?: "",
+                        meetingLink = doc.getString("meetingLink") ?: ""
+                    )
+                }?.sortedBy { it.date.toDate() }?.take(5) ?: emptyList()
+            }
+
+        // Total unique clients
         db.collection("sessions")
             .whereEqualTo("psychologistId", userProfile.uid)
             .addSnapshotListener { snapshot, _ ->
                 totalClients = snapshot?.documents?.map { it.getString("clientId") }?.distinct()?.size ?: 0
             }
+
+        // Completed sessions this week
+        val startOfWeek = Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+        }.timeInMillis
+
+        db.collection("sessions")
+            .whereEqualTo("psychologistId", userProfile.uid)
+            .whereEqualTo("status", "completed")
+            .whereGreaterThanOrEqualTo("date", com.google.firebase.Timestamp(Date(startOfWeek)))
+            .addSnapshotListener { snapshot, _ ->
+                completedSessionsThisWeek = snapshot?.size() ?: 0
+            }
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        item {
-            Text(
-                "Welcome, Dr. ${userProfile.displayName.split(" ").last()}",
-                style = MaterialTheme.typography.headlineMedium
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (isLoading) {
+            CircularProgressIndicator(
+                modifier = Modifier.align(Alignment.Center)
             )
-        }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFFF3E5F5),
+                                Color(0xFFFFFBFE)
+                            )
+                        )
+                    ),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(16.dp)
+            ) {
+                // Header Section
+                item {
+                    Column {
+                        Text(
+                            "Good ${getTimeOfDay()},",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            "Dr. ${userProfile.displayName.split(" ").lastOrNull() ?: userProfile.displayName}",
+                            style = MaterialTheme.typography.headlineLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
 
-        item {
+                // Stats Cards Row
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Today's Sessions
+                        ModernStatCard(
+                            title = "Today",
+                            value = todaySessions.size.toString(),
+                            subtitle = if (todaySessions.size == 1) "session" else "sessions",
+                            icon = Icons.Default.CalendarToday,
+                            color = Color(0xFF6750A4),
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        // Total Clients
+                        ModernStatCard(
+                            title = "Clients",
+                            value = totalClients.toString(),
+                            subtitle = "total",
+                            icon = Icons.Default.Face,
+                            color = Color(0xFF2196F3),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // This Week
+                        ModernStatCard(
+                            title = "This Week",
+                            value = completedSessionsThisWeek.toString(),
+                            subtitle = "completed",
+                            icon = Icons.Default.CheckCircle,
+                            color = Color(0xFF4CAF50),
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        // Upcoming
+                        ModernStatCard(
+                            title = "Upcoming",
+                            value = upcomingSessions.size.toString(),
+                            subtitle = "next 7 days",
+                            icon = Icons.Default.DateRange,
+                            color = Color(0xFFFF9800),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                // Today's Schedule Section
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                "Today's Schedule",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                SimpleDateFormat("EEEE, MMMM dd", Locale.getDefault()).format(Date()),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (todaySessions.isNotEmpty()) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                shape = RoundedCornerShape(20.dp)
+                            ) {
+                                Text(
+                                    "${todaySessions.size} ${if (todaySessions.size == 1) "session" else "sessions"}",
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (todaySessions.isNotEmpty()) {
+                    items(todaySessions) { session ->
+                        ModernSessionCard(session)
+                    }
+                } else {
+                    item {
+                        EmptyScheduleCard()
+                    }
+                }
+
+                // Upcoming Sessions Section
+                if (upcomingSessions.isNotEmpty()) {
+                    item {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Upcoming Sessions",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    items(upcomingSessions.take(3)) { session ->
+                        CompactSessionCard(session)
+                    }
+                }
+
+                // Bottom Spacer
+                item {
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+        }
+    }
+}
+
+// Helper function for greeting
+private fun getTimeOfDay(): String {
+    val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+    return when (hour) {
+        in 0..11 -> "morning"
+        in 12..16 -> "afternoon"
+        else -> "evening"
+    }
+}
+
+@Composable
+fun ModernStatCard(
+    title: String,
+    value: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.height(130.dp),
+        shape = RoundedCornerShape(20.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = color.copy(alpha = 0.1f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
             ) {
-                Card(
-                    modifier = Modifier.weight(1f),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    )
+                Text(
+                    title,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = color.copy(alpha = 0.8f),
+                    fontWeight = FontWeight.Medium
+                )
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .background(color.copy(alpha = 0.2f), CircleShape),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            todaySessions.size.toString(),
-                            style = MaterialTheme.typography.displayMedium
-                        )
-                        Text(
-                            "Today's Sessions",
-                            style = MaterialTheme.typography.bodyMedium,
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                    Icon(
+                        icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = color
+                    )
                 }
-                Card(
-                    modifier = Modifier.weight(1f),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer
-                    )
+            }
+
+            Column {
+                Text(
+                    value,
+                    style = MaterialTheme.typography.displaySmall,
+                    fontWeight = FontWeight.Bold,
+                    color = color
+                )
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ModernSessionCard(session: Session) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color.White
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Time Badge
+            Box(
+                modifier = Modifier
+                    .width(70.dp)
+                    .height(70.dp)
+                    .background(
+                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF6750A4),
+                                Color(0xFF7D5260)
+                            )
+                        ),
+                        shape = RoundedCornerShape(16.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            totalClients.toString(),
-                            style = MaterialTheme.typography.displayMedium
-                        )
-                        Text(
-                            "Total Clients",
-                            style = MaterialTheme.typography.bodyMedium,
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                    Text(
+                        SimpleDateFormat("HH:mm", Locale.getDefault()).format(session.date.toDate()),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Text(
+                        SimpleDateFormat("a", Locale.getDefault()).format(session.date.toDate()),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(alpha = 0.8f)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            // Session Details
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    session.clientName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.AccessTime,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        "${session.duration} minutes",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (session.notes.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        session.notes,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            // Status Badge
+            Surface(
+                color = when (session.status) {
+                    "scheduled" -> Color(0xFFE3F2FD)
+                    "completed" -> Color(0xFFE8F5E9)
+                    else -> Color(0xFFFFEBEE)
+                },
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(
+                                when (session.status) {
+                                    "scheduled" -> Color(0xFF1976D2)
+                                    "completed" -> Color(0xFF388E3C)
+                                    else -> Color(0xFFD32F2F)
+                                },
+                                CircleShape
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        session.status.replaceFirstChar { it.uppercase() },
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = when (session.status) {
+                            "scheduled" -> Color(0xFF1976D2)
+                            "completed" -> Color(0xFF388E3C)
+                            else -> Color(0xFFD32F2F)
+                        }
+                    )
                 }
             }
         }
+    }
+}
 
-        item {
+@Composable
+fun CompactSessionCard(session: Session) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    SimpleDateFormat("EEE, MMM dd", Locale.getDefault()).format(session.date.toDate()),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    session.clientName,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+            }
             Text(
-                "Today's Schedule",
-                style = MaterialTheme.typography.titleLarge
+                SimpleDateFormat("HH:mm", Locale.getDefault()).format(session.date.toDate()),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
             )
         }
+    }
+}
 
-        items(todaySessions) { session ->
-            SessionCard(session, isClient = false)
-        }
-
-        if (todaySessions.isEmpty()) {
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            "No sessions scheduled for today",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                    }
-                }
+@Composable
+fun EmptyScheduleCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color(0xFFF3E5F5)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .background(
+                        Color(0xFF6750A4).copy(alpha = 0.1f),
+                        CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp),
+                    tint = Color(0xFF6750A4)
+                )
             }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                "No Sessions Today",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "Enjoy your free day! Check upcoming sessions below.",
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -4466,6 +5355,514 @@ fun CreateResourceDialog(
         }
     )
 }
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ClientCalendarScreen(userProfile: UserProfile) {
+    val db = FirebaseFirestore.getInstance("mindspacedb")
+    var psychologists by remember { mutableStateOf<List<UserProfile>>(emptyList()) }
+    var selectedPsychologist by remember { mutableStateOf<UserProfile?>(null) }
+    var selectedDate by remember { mutableStateOf<Calendar?>(null) }
+    var selectedTime by remember { mutableStateOf<String?>(null) }
+    var showPsychologistDialog by remember { mutableStateOf(false) }
+    var showDateDialog by remember { mutableStateOf(false) }
+    var clientNotes by remember { mutableStateOf("") }
+    var existingSessions by remember { mutableStateOf<List<SessionRequest>>(emptyList()) }
+
+    // Standard time slots
+    val standardTimeSlots = listOf("8:30 AM", "10:00 AM", "1:00 PM", "3:00 PM")
+
+    LaunchedEffect(Unit) {
+        // Load all active psychologists
+        db.collection("users")
+            .whereEqualTo("role", "psychologist")
+            .whereEqualTo("status", "active")
+            .addSnapshotListener { snapshot, _ ->
+                psychologists = snapshot?.documents?.mapNotNull { doc ->
+                    doc.toObject(UserProfile::class.java)
+                } ?: emptyList()
+            }
+
+        // Load client's existing sessions to prevent double-booking
+        db.collection("sessionRequests")
+            .whereEqualTo("clientId", userProfile.uid)
+            .addSnapshotListener { snapshot, _ ->
+                existingSessions = snapshot?.documents?.mapNotNull { doc ->
+                    doc.toObject(SessionRequest::class.java)
+                } ?: emptyList()
+            }
+    }
+
+    Scaffold(
+        floatingActionButton = {
+            if (selectedPsychologist != null && selectedDate != null && selectedTime != null) {
+                FloatingActionButton(
+                    onClick = {
+                        // Check if client already has a session on this date
+                        val hasSessionOnDate = existingSessions.any { session ->
+                            val sessionDate = Calendar.getInstance().apply {
+                                time = session.requestedDate.toDate()
+                            }
+                            isSameDay(sessionDate, selectedDate!!)
+                        }
+
+                        if (hasSessionOnDate) {
+                            // Show error - max 1 session per day
+                            println("❌ Client already has a session booked on this date")
+                            return@FloatingActionButton
+                        }
+
+                        // Create the actual timestamp with selected time
+                        val finalDateTime = Calendar.getInstance().apply {
+                            time = selectedDate!!.time
+                            // Parse the selected time and set hours/minutes
+                            val timeParts = selectedTime!!.split(":", " ")
+                            var hour = timeParts[0].toInt()
+                            val minute = timeParts[1].toInt()
+                            val period = timeParts[2]
+
+                            // Convert to 24-hour format
+                            if (period == "PM" && hour < 12) hour += 12
+                            if (period == "AM" && hour == 12) hour = 0
+
+                            set(Calendar.HOUR_OF_DAY, hour)
+                            set(Calendar.MINUTE, minute)
+                            set(Calendar.SECOND, 0)
+                            set(Calendar.MILLISECOND, 0)
+                        }
+
+                        val sessionRequest = SessionRequest(
+                            clientId = userProfile.uid,
+                            clientName = userProfile.displayName,
+                            psychologistId = selectedPsychologist!!.uid,
+                            psychologistName = selectedPsychologist!!.displayName,
+                            requestedDate = com.google.firebase.Timestamp(finalDateTime.time),
+                            duration = 60,
+                            status = "pending",
+                            clientNotes = clientNotes,
+                            psychologistResponse = "",
+                            finalDate = null,
+                            createdAt = com.google.firebase.Timestamp.now()
+                        )
+
+                        // REMOVE THE DUPLICATE LINE - ONLY CALL THIS ONCE
+                        db.collection("sessionRequests").add(sessionRequest)
+                            .addOnSuccessListener {
+                                // Reset form
+                                selectedPsychologist = null
+                                selectedDate = null
+                                selectedTime = null
+                                clientNotes = ""
+                                println("✅ Session request submitted successfully!")
+                            }
+                            .addOnFailureListener { e ->
+                                println("❌ Failed to submit session request: ${e.message}")
+                            }
+                    },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Icon(Icons.Default.Send, "Request Session")
+                }
+            }
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                Text(
+                    "Book a Session",
+                    style = MaterialTheme.typography.headlineMedium
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Find and book sessions with our psychologists",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // Psychologist Selection
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            "1. Choose a Psychologist",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        if (selectedPsychologist != null) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Image(
+                                    painter = rememberAsyncImagePainter(selectedPsychologist!!.photoUrl),
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(50.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(selectedPsychologist!!.displayName)
+                                    Text(
+                                        selectedPsychologist!!.specializations.joinToString(", "),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                TextButton(onClick = {
+                                    selectedPsychologist = null
+                                    selectedDate = null
+                                    selectedTime = null
+                                }) {
+                                    Text("Change")
+                                }
+                            }
+                        } else {
+                            Button(
+                                onClick = { showPsychologistDialog = true },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Select Psychologist")
+                            }
+                        }
+                    }
+                }
+            }
+// Date Selection (only show if psychologist is selected)
+            if (selectedPsychologist != null) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                "2. Choose Date & Time",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            if (selectedDate != null) {
+                                Text(
+                                    "Selected: ${SimpleDateFormat("EEE, MMM dd, yyyy", Locale.getDefault()).format(selectedDate!!.time)}",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                // Check if client already has session on this date
+                                val hasSessionOnDate = existingSessions.any { session ->
+                                    val sessionDate = Calendar.getInstance().apply {
+                                        time = session.requestedDate.toDate()
+                                    }
+                                    isSameDay(sessionDate, selectedDate!!)
+                                }
+
+                                if (hasSessionOnDate) {
+                                    Text(
+                                        "You already have a session booked on this date",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                    Text(
+                                        "Maximum 1 session per day allowed",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                } else {
+                                    Text(
+                                        "Available Time Slots:",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    // Show standard time slots
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        items(standardTimeSlots) { timeSlot ->
+                                            OutlinedButton(
+                                                onClick = { selectedTime = timeSlot },
+                                                modifier = Modifier.width(100.dp),
+                                                colors = ButtonDefaults.outlinedButtonColors(
+                                                    containerColor = if (selectedTime == timeSlot)
+                                                        MaterialTheme.colorScheme.primaryContainer
+                                                    else
+                                                        Color.Transparent
+                                                ),
+                                                border = BorderStroke(
+                                                    1.dp,
+                                                    if (selectedTime == timeSlot)
+                                                        MaterialTheme.colorScheme.primary
+                                                    else
+                                                        MaterialTheme.colorScheme.outline
+                                                )
+                                            ) {
+                                                Text(
+                                                    timeSlot,
+                                                    color = if (selectedTime == timeSlot)
+                                                        MaterialTheme.colorScheme.primary
+                                                    else
+                                                        MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Button(
+                                    onClick = { showDateDialog = true },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Change Date")
+                                }
+                            } else {
+                                // THIS WAS MISSING - shows Select Date button when no date chosen
+                                Button(
+                                    onClick = { showDateDialog = true },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Select Date")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // Notes Section (only show if time is selected)
+            if (selectedTime != null) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                "3. Session Notes (Optional)",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            OutlinedTextField(
+                                value = clientNotes,
+                                onValueChange = { clientNotes = it },
+                                label = { Text("Any specific concerns or topics?") },
+                                modifier = Modifier.fillMaxWidth(),
+                                minLines = 3
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                "Ready to book! Tap the + button below to submit your request.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Psychologist Selection Dialog
+    if (showPsychologistDialog) {
+        AlertDialog(
+            onDismissRequest = { showPsychologistDialog = false },
+            title = { Text("Choose a Psychologist") },
+            text = {
+                LazyColumn {
+                    items(psychologists) { psychologist ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clickable {
+                                    selectedPsychologist = psychologist
+                                    showPsychologistDialog = false
+                                },
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Image(
+                                    painter = rememberAsyncImagePainter(psychologist.photoUrl),
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(50.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(psychologist.displayName)
+                                    Text(
+                                        psychologist.specializations.joinToString(", "),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        "${psychologist.experience} years experience",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPsychologistDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Date Picker Dialog
+    if (showDateDialog) {
+        AlertDialog(
+            onDismissRequest = { showDateDialog = false },
+            title = { Text("Select Date") },
+            text = {
+                Column {
+                    Text("Select a date for your session:", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Show next 14 days as options
+                    val next14Days = List(14) { i ->
+                        Calendar.getInstance().apply {
+                            add(Calendar.DAY_OF_YEAR, i)
+                        }
+                    }
+
+                    LazyColumn {
+                        items(next14Days) { date ->
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                                    .clickable {
+                                        selectedDate = date
+                                        selectedTime = null // Reset time when date changes
+                                        showDateDialog = false
+                                    },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (selectedDate?.get(Calendar.DAY_OF_YEAR) == date.get(Calendar.DAY_OF_YEAR))
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    else
+                                        MaterialTheme.colorScheme.surfaceVariant
+                                )
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(
+                                        SimpleDateFormat("EEEE, MMM dd", Locale.getDefault()).format(date.time),
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Text(
+                                        SimpleDateFormat("yyyy", Locale.getDefault()).format(date.time),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showDateDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+// Helper function
+private fun isSameDay(cal1: Calendar, cal2: Calendar): Boolean {
+    return cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR) &&
+            cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR)
+}
+@Composable
+fun SessionRequestCard(request: SessionRequest, isClient: Boolean) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.Schedule,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .padding(end = 12.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        if (isClient) "with ${request.psychologistName}" else request.clientName,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        SimpleDateFormat("MMM dd, yyyy - hh:mm a", Locale.getDefault())
+                            .format(request.requestedDate.toDate()),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (request.clientNotes.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            request.clientNotes,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Surface(
+                    color = when (request.status) {
+                        "pending" -> Color(0xFFFFF3E0)
+                        "approved" -> Color(0xFFE8F5E9)
+                        "rejected" -> Color(0xFFFFEBEE)
+                        else -> Color(0xFFF5F5F5)
+                    },
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        request.status.replaceFirstChar {
+                            if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString()
+                        },
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = when (request.status) {
+                            "pending" -> Color(0xFFF57C00)
+                            "approved" -> Color(0xFF388E3C)
+                            "rejected" -> Color(0xFFD32F2F)
+                            else -> Color(0xFF757575)
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
 
 
 // ADMIN SCREENS (Complete)
@@ -5052,80 +6449,6 @@ fun AdminDashboardScreen() {
                 }
             }
 
-            item {
-                Spacer(modifier = Modifier.height(16.dp))
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (totalUsers <= 1) Color(0xFFFFEBEE) else MaterialTheme.colorScheme.surfaceVariant
-                    )
-                ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Default.Settings,
-                                contentDescription = null,
-                                modifier = Modifier.size(24.dp),
-                                tint = if (totalUsers <= 1) Color(0xFFD32F2F) else MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                if (totalUsers <= 1) "⚠️ Migration Required" else "Admin Tools",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                                color = if (totalUsers <= 1) Color(0xFFD32F2F) else MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Text(
-                            if (totalUsers <= 1)
-                                "You have users in Firebase Authentication but not in Firestore. Use the tool below to create their profiles manually."
-                            else
-                                "Use this tool if you need to manually create profiles for existing auth users.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (totalUsers <= 1) Color(0xFFC62828) else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = Color(0xFFFFF9C4)
-                            ),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Text(
-                                    "📋 How to get User IDs:",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    "1. Open Firebase Console\n" +
-                                            "2. Go to Authentication tab\n" +
-                                            "3. Copy the User UID from each user\n" +
-                                            "4. Create profiles below",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    lineHeight = 20.sp
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        ManualUserCreator(
-                            db = db,
-                            onUserCreated = {
-                                // Stats will refresh automatically via listeners
-                            }
-                        )
-                    }
-                }
-            }
 
             item {
                 Spacer(modifier = Modifier.height(16.dp))
